@@ -23,6 +23,14 @@ from utils import vision_logger
 
 from .model_config import MVSModelConfig
 from .models import OCRToken
+from .ocr_geometry import (
+    box_score,
+    crop_text,
+    expand_box,
+    mini_box,
+    rotate_image,
+    sort_text_boxes,
+)
 
 
 class OCRBackend(Protocol):
@@ -311,66 +319,19 @@ class ONNXRuntimeOCRBackend:
 
     @staticmethod
     def _mini_box(contour: np.ndarray) -> tuple[np.ndarray, float]:
-        rectangle = cv2.minAreaRect(contour.astype(np.float32))
-        points = sorted(cv2.boxPoints(rectangle).tolist(), key=lambda item: item[0])
-        if points[1][1] > points[0][1]:
-            first, fourth = 0, 1
-        else:
-            first, fourth = 1, 0
-        if points[3][1] > points[2][1]:
-            second, third = 2, 3
-        else:
-            second, third = 3, 2
-        ordered = np.asarray(
-            [points[first], points[second], points[third], points[fourth]],
-            dtype=np.float32,
-        )
-        return ordered, min(rectangle[1])
+        return mini_box(contour)
 
     @staticmethod
     def _box_score(bitmap: np.ndarray, box: np.ndarray) -> float:
-        height, width = bitmap.shape
-        xmin = max(0, min(math.floor(box[:, 0].min()), width - 1))
-        xmax = max(0, min(math.ceil(box[:, 0].max()), width - 1))
-        ymin = max(0, min(math.floor(box[:, 1].min()), height - 1))
-        ymax = max(0, min(math.ceil(box[:, 1].max()), height - 1))
-        mask = np.zeros((ymax - ymin + 1, xmax - xmin + 1), dtype=np.uint8)
-        local = box.copy()
-        local[:, 0] -= xmin
-        local[:, 1] -= ymin
-        cv2.fillPoly(mask, local.reshape(1, -1, 2).astype(np.int32), 1)
-        return float(
-            cv2.mean(bitmap[ymin : ymax + 1, xmin : xmax + 1], mask)[0]
-        )
+        return box_score(bitmap, box)
 
     @staticmethod
     def _expand_box(box: np.ndarray, ratio: float) -> np.ndarray:
-        area = abs(cv2.contourArea(box))
-        perimeter = cv2.arcLength(box, True)
-        if perimeter <= 0:
-            return box
-        distance = area * ratio / perimeter
-        rectangle = cv2.minAreaRect(box.astype(np.float32))
-        center, size, angle = rectangle
-        expanded = (size[0] + 2 * distance, size[1] + 2 * distance)
-        return cv2.boxPoints((center, expanded, angle))
+        return expand_box(box, ratio)
 
     @classmethod
     def _sort_boxes(cls, polygons: Sequence[np.ndarray]) -> list[np.ndarray]:
-        boxes = sorted(polygons, key=lambda box: (box[0][1], box[0][0]))
-        for index in range(len(boxes) - 1):
-            for cursor in range(index, -1, -1):
-                if (
-                    abs(boxes[cursor + 1][0][1] - boxes[cursor][0][1]) < 10
-                    and boxes[cursor + 1][0][0] < boxes[cursor][0][0]
-                ):
-                    boxes[cursor], boxes[cursor + 1] = (
-                        boxes[cursor + 1],
-                        boxes[cursor],
-                    )
-                else:
-                    break
-        return boxes
+        return sort_text_boxes(polygons)
 
     @classmethod
     def _crop_text(
@@ -378,47 +339,11 @@ class ONNXRuntimeOCRBackend:
         image: np.ndarray,
         polygon: np.ndarray,
     ) -> np.ndarray:
-        points, _ = cls._mini_box(np.asarray(polygon).reshape(-1, 1, 2))
-        width = int(
-            max(
-                np.linalg.norm(points[0] - points[1]),
-                np.linalg.norm(points[2] - points[3]),
-            )
-        )
-        height = int(
-            max(
-                np.linalg.norm(points[0] - points[3]),
-                np.linalg.norm(points[1] - points[2]),
-            )
-        )
-        if width <= 0 or height <= 0:
-            return np.empty((0, 0, 3), dtype=image.dtype)
-        target = np.float32(
-            [[0, 0], [width, 0], [width, height], [0, height]]
-        )
-        matrix = cv2.getPerspectiveTransform(points.astype(np.float32), target)
-        crop = cv2.warpPerspective(
-            image,
-            matrix,
-            (width, height),
-            borderMode=cv2.BORDER_REPLICATE,
-            flags=cv2.INTER_CUBIC,
-        )
-        if crop.shape[0] / float(crop.shape[1]) >= 1.5:
-            crop = np.rot90(crop)
-        return crop
+        return crop_text(image, polygon)
 
     @staticmethod
     def _rotate_image(image: np.ndarray, angle: int) -> np.ndarray:
-        if angle == 0:
-            return image
-        if angle == 90:
-            return cv2.rotate(image, cv2.ROTATE_90_COUNTERCLOCKWISE)
-        if angle == 180:
-            return cv2.rotate(image, cv2.ROTATE_180)
-        if angle == 270:
-            return cv2.rotate(image, cv2.ROTATE_90_CLOCKWISE)
-        raise ValueError(f"不支持的旋转角度: {angle}")
+        return rotate_image(image, angle)
 
     def decode_qr(self, image: np.ndarray) -> str | None:
         try:
