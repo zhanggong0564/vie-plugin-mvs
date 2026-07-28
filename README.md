@@ -15,24 +15,27 @@ curl -X POST http://127.0.0.1:3001/api/v1/mvs_inspect \
 
 ## 运行依赖
 
-- `paddleocr==3.7.0`
-- 项目统一的 ONNX Runtime 推理环境
+- `onnxruntime-gpu==1.20.1`
+- OpenCV、NumPy 和 PyYAML
 - PP-OCRv5 完整五模型流水线
 
-插件显式选择 `PP-OCRv5_server_det`、`PP-OCRv5_server_rec` 和
-`engine=onnxruntime`，并将检测最长边限制为 1536 像素，避免高分辨率现场图片产生
-过大的推理中间张量。模型不会随 PaddleOCR 默认版本升级切换。
+插件直接使用 ONNX Runtime 串联文档方向、UVDoc 矫正、文本检测、文本行方向和
+文本识别五个模型，不依赖 PaddleOCR 或 PaddleX。文本检测最长边限制为 1536
+像素，避免高分辨率现场图片产生过大的推理中间张量。五个模型统一通过框架
+`services.inference.InferenceRunner` 执行，方向分类和 CTC 解码复用
+`services.base` 公共管线。
 
 首次下载官方模型并运行仓库样例：
 
 ```bash
-conda run -n ppocr python plugins/vie-plugin-mvs/examples/run.py --download-models
+conda run -n mobile_vision python plugins/vie-plugin-mvs/examples/run.py \
+  --download-models
 ```
 
 后续直接调试：
 
 ```bash
-conda run -n ppocr python plugins/vie-plugin-mvs/examples/run.py \
+conda run -n mobile_vision python plugins/vie-plugin-mvs/examples/run.py \
   --manifest demo/data/MVS/manifest_images/5a03d7c0-d742-408d-af83-044104f7c7f7.JPG \
   --label demo/data/MVS/images_to_inspect/01ecd42e-04cf-4c08-a3b3-0e7f6034e5ac.JPG
 ```
@@ -44,7 +47,7 @@ conda run -n ppocr python plugins/vie-plugin-mvs/examples/run.py \
 
 可使用以下环境变量：
 
-- `MVS_OCR_DEVICE`：默认 `gpu:0`
+- `MVS_OCR_DEVICE`：默认 `gpu:0`；GPU 模式缺少 CUDA Provider 时直接报错
 - `MVS_DOC_ORIENTATION_MODEL_DIR`：文档方向模型目录
 - `MVS_DOC_UNWARPING_MODEL_DIR`：文档矫正模型目录
 - `MVS_TEXT_DETECTION_MODEL_DIR`：本地 PP-OCRv5 检测模型目录
