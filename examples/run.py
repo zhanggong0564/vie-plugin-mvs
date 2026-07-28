@@ -16,8 +16,10 @@ import json
 import os
 import shutil
 import sys
+import tarfile
 import tempfile
 import time
+import urllib.request
 from pathlib import Path
 
 
@@ -169,7 +171,7 @@ def read_image(path):
     return image
 
 
-def download_official_models(device):
+def download_official_models(_device):
     config = MVSModelConfig.from_env(cwd=REPO_ROOT)
     existing = [path for path in config.paths.values() if path.exists()]
     if existing:
@@ -178,34 +180,31 @@ def download_official_models(device):
             + "\n".join(str(path) for path in existing)
         )
 
-    os.environ["PADDLE_PDX_MODEL_SOURCE"] = "BOS"
-    os.environ["PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK"] = "True"
     with tempfile.TemporaryDirectory(
-        prefix="vie-mvs-ppocr-download-",
+        prefix="vie-mvs-onnx-download-",
         dir="/tmp",
-    ) as cache_dir:
-        os.environ["PADDLE_PDX_CACHE_HOME"] = cache_dir
-        from paddleocr import PaddleOCR
-
-        pipeline = PaddleOCR(
-            ocr_version="PP-OCRv5",
-            doc_orientation_classify_model_name="PP-LCNet_x1_0_doc_ori",
-            doc_unwarping_model_name="UVDoc",
-            text_detection_model_name="PP-OCRv5_server_det",
-            textline_orientation_model_name="PP-LCNet_x1_0_textline_ori",
-            text_recognition_model_name="PP-OCRv5_server_rec",
-            use_doc_orientation_classify=True,
-            use_doc_unwarping=True,
-            use_textline_orientation=True,
-            engine="onnxruntime",
-            device=device,
-        )
-        del pipeline
-
-        source_root = Path(cache_dir) / "official_models"
+    ) as cache_dir_value:
+        cache_dir = Path(cache_dir_value)
         sources = {}
         for spec in MODEL_SPECS:
-            source = source_root / f"{spec.model_name}_onnx"
+            package_name = f"{spec.model_name}_onnx"
+            archive = cache_dir / f"{package_name}.tar"
+            url = (
+                "https://paddle-model-ecology.bj.bcebos.com/"
+                "paddlex/official_inference_model/paddle3.0.0/"
+                f"{package_name}_infer.tar"
+            )
+            urllib.request.urlretrieve(url, archive)
+            with tarfile.open(archive) as stream:
+                root = cache_dir.resolve()
+                for member in stream.getmembers():
+                    destination = (cache_dir / member.name).resolve()
+                    if root not in destination.parents and destination != root:
+                        raise RuntimeError(
+                            f"官方模型压缩包包含非法路径: {member.name}"
+                        )
+                stream.extractall(cache_dir)
+            source = cache_dir / package_name
             if not source.is_dir() or not any(source.iterdir()):
                 raise RuntimeError(
                     f"官方 ONNX 模型下载不完整: {spec.model_name}"
@@ -257,9 +256,7 @@ def write_model_manifest(config):
         )
     manifest = {
         "source": "Paddle BOS",
-        "paddleocr_version": "3.7.0",
-        "paddlex_version": "3.7.2",
-        "engine": "onnxruntime",
+        "runtime": "onnxruntime-gpu==1.20.1",
         "models": records,
     }
     root.mkdir(parents=True, exist_ok=True)
