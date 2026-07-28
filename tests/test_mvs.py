@@ -461,6 +461,25 @@ def test_onnx_backend_ctc_decode_removes_blanks_and_duplicates():
     assert [result.score for result in results] == pytest.approx([0.825])
 
 
+def test_onnx_backend_keeps_geometry_helpers_compatible():
+    from vie_plugin_mvs.ocr_geometry import mini_box, rotate_image
+
+    image = np.arange(18, dtype=np.uint8).reshape(2, 3, 3)
+    contour = np.array(
+        [[[0, 0]], [[4, 0]], [[4, 2]], [[0, 2]]],
+        dtype=np.float32,
+    )
+
+    assert np.array_equal(
+        ONNXRuntimeOCRBackend._rotate_image(image, 180),
+        rotate_image(image, 180),
+    )
+    backend_box, backend_side = ONNXRuntimeOCRBackend._mini_box(contour)
+    geometry_box, geometry_side = mini_box(contour)
+    assert np.array_equal(backend_box, geometry_box)
+    assert backend_side == geometry_side
+
+
 def test_plugin_exposes_only_multi_image_endpoint():
     routes = mvs_router.get_router().routes
     paths = [route.path for route in routes]
