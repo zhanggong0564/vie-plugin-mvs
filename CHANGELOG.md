@@ -23,3 +23,4 @@
 - GPU 模式强制校验 CUDA Execution Provider，避免静默回退到 CPU。
 - 五模型统一接入框架 InferenceRunner，并复用公共分类与 CTC 识别管线。
 - 五模型改由框架 Runner Group 统一管理生命周期，并登记可观测的模型角色。
+- 多图片端点接入框架批量路由与业务基类，复用上传暂存、调用统计和逐图关联回流。
