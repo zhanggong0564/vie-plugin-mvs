@@ -1,9 +1,10 @@
-import sys
 from types import SimpleNamespace
+from unittest.mock import MagicMock, call, patch
 
 import numpy as np
 import pytest
 
+from services.inference import OnnxRuntimeOptions, RunnerSpec
 from vie_plugin_mvs.config import load_rules
 from vie_plugin_mvs.inspectors import OCRLabelInspector
 from vie_plugin_mvs.matcher import MaterialMatcher
@@ -14,7 +15,10 @@ from vie_plugin_mvs.models import (
     OCRToken,
     PackingListItem,
 )
-from vie_plugin_mvs.ocr import PaddleOCRv5Backend
+from vie_plugin_mvs.ocr import (
+    ONNXRuntimeOCRBackend,
+    _PPocrRecognitionPipeline,
+)
 from vie_plugin_mvs.plugin import mvs_router
 from vie_plugin_mvs.service import MVSService, order_images
 from vie_plugin_mvs.table_parser import FixedPackingListParser
@@ -299,54 +303,119 @@ def test_model_config_requires_all_five_local_models(tmp_path):
         config.validate()
 
 
-def test_paddle_backend_pins_complete_v5_pipeline(monkeypatch, tmp_path):
-    calls = {}
-
-    class FakePaddleOCR:
-        def __init__(self, **kwargs):
-            calls.update(kwargs)
-
-        def predict(self, image):
-            return [
-                SimpleNamespace(
-                    json={
-                        "res": {
-                            "rec_texts": ["堵头"],
-                            "rec_scores": [0.98],
-                            "rec_polys": [[[1, 2], [3, 2], [3, 4], [1, 4]]],
-                        }
-                    }
-                )
-            ]
-
-    monkeypatch.setitem(
-        sys.modules, "paddleocr", SimpleNamespace(PaddleOCR=FakePaddleOCR)
-    )
+def _onnx_model_config(tmp_path):
     paths = {}
     for spec in MODEL_SPECS:
         path = tmp_path / spec.key
         path.mkdir()
-        (path / "inference.json").write_text("{}", encoding="utf-8")
+        (path / "inference.onnx").write_bytes(b"onnx")
+        config = (
+            "PostProcess:\n  character_dict:\n    - 堵\n    - 头\n"
+            if spec.key == "text_recognition"
+            else "{}\n"
+        )
+        (path / "inference.yml").write_text(config, encoding="utf-8")
         paths[spec.key] = path
+    return MVSModelConfig(paths=paths)
 
-    backend = PaddleOCRv5Backend(
-        device="cpu",
-        model_config=MVSModelConfig(paths=paths),
+
+def _onnx_settings():
+    return SimpleNamespace(
+        ONNX_REQUIRE_CUDA=False,
+        ORT_CUDA_DEVICE_ID=0,
+        ORT_CUDNN_CONV_ALGO_SEARCH="HEURISTIC",
+        ORT_ARENA_EXTEND_STRATEGY="kSameAsRequested",
+        ORT_CUDA_MEM_LIMIT_GB=0.0,
     )
-    tokens = backend.infer(np.zeros((10, 10, 3), dtype=np.uint8))
 
-    assert calls["ocr_version"] == "PP-OCRv5"
-    assert calls["doc_orientation_classify_model_name"] == "PP-LCNet_x1_0_doc_ori"
-    assert calls["doc_unwarping_model_name"] == "UVDoc"
-    assert calls["text_detection_model_name"] == "PP-OCRv5_server_det"
-    assert calls["textline_orientation_model_name"] == "PP-LCNet_x1_0_textline_ori"
-    assert calls["text_recognition_model_name"] == "PP-OCRv5_server_rec"
-    assert calls["text_det_limit_side_len"] == 1536
-    assert calls["text_det_limit_type"] == "max"
-    assert calls["engine"] == "onnxruntime"
-    for spec in MODEL_SPECS:
-        assert calls[spec.paddle_arg] == str(paths[spec.key])
-    assert tokens[0].text == "堵头"
+
+def test_onnx_backend_creates_and_injects_five_framework_runners(tmp_path):
+    config = _onnx_model_config(tmp_path)
+    settings = _onnx_settings()
+    runners = [MagicMock() for _ in MODEL_SPECS]
+
+    with patch(
+        "services.inference.group.create_inference_runner",
+        side_effect=runners,
+    ) as runner_factory:
+        backend = ONNXRuntimeOCRBackend.from_settings(
+            settings,
+            device="gpu:2",
+            model_config=config,
+        )
+
+    options = OnnxRuntimeOptions.from_settings(
+        settings,
+        require_cuda=True,
+        cuda_device_id=2,
+    )
+    assert runner_factory.call_args_list == [
+        call(
+            RunnerSpec(
+                scenario="mvs",
+                onnx_path=str(config.paths[spec.key] / "inference.onnx"),
+                model_role=spec.key,
+            ),
+            options,
+            status_registry=None,
+        )
+        for spec in MODEL_SPECS
+    ]
+    assert list(backend.runners.values()) == runners
+    assert backend.characters == ["堵", "头", " "]
+
+
+def test_onnx_backend_cpu_device_uses_framework_cpu_provider():
+    options = ONNXRuntimeOCRBackend._runtime_options(
+        _onnx_settings(),
+        "cpu",
+    )
+
+    assert options.providers == ("CPUExecutionProvider",)
+    assert options.require_cuda is False
+
+
+def test_onnx_backend_runner_failure_closes_created_runners(tmp_path):
+    first_runner = MagicMock()
+    with (
+        patch(
+            "services.inference.group.create_inference_runner",
+            side_effect=[first_runner, RuntimeError("runner failed")],
+        ),
+        pytest.raises(RuntimeError, match="runner failed"),
+    ):
+        ONNXRuntimeOCRBackend.from_settings(
+            _onnx_settings(),
+            model_config=_onnx_model_config(tmp_path),
+        )
+
+    first_runner.close.assert_called_once_with()
+
+
+def test_onnx_backend_ctc_decode_removes_blanks_and_duplicates():
+    runner = SimpleNamespace(
+        input_infos=[SimpleNamespace(name="x")],
+    )
+    pipeline = _PPocrRecognitionPipeline(
+        runner,
+        characters=["堵", "头", " "],
+        input_height=48,
+        max_width=3200,
+    )
+    predictions = np.zeros((1, 6, 4), dtype=np.float32)
+    predictions[0, range(6), [0, 1, 1, 0, 2, 2]] = [
+        0.9,
+        0.8,
+        0.7,
+        0.95,
+        0.85,
+        0.75,
+    ]
+
+    results = pipeline.decode(predictions)
+
+    assert [result.text for result in results] == ["堵头"]
+    assert [result.score for result in results] == pytest.approx([0.825])
 
 
 def test_plugin_exposes_only_multi_image_endpoint():
