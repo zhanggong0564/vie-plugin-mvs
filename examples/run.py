@@ -2,11 +2,11 @@
 
 默认使用仓库 ``demo/data/MVS`` 下的一张装箱单和一张堵头标签：
 
-    conda run -n ppocr python plugins/vie-plugin-mvs/examples/run.py
+    conda run -n mobile_vision python plugins/vie-plugin-mvs/examples/run.py
 
 首次下载五个官方模型并运行：
 
-    conda run -n ppocr python plugins/vie-plugin-mvs/examples/run.py \
+    conda run -n mobile_vision python plugins/vie-plugin-mvs/examples/run.py \
         --download-models
 """
 
@@ -33,11 +33,12 @@ sys.path.insert(0, str(PLUGIN_ROOT))
 import cv2  # noqa: E402
 import numpy as np  # noqa: E402
 
+from config import settings  # noqa: E402
 from vie_plugin_mvs.model_config import (  # noqa: E402
     MODEL_SPECS,
     MVSModelConfig,
 )
-from vie_plugin_mvs.ocr import PaddleOCRv5Backend  # noqa: E402
+from vie_plugin_mvs.ocr import ONNXRuntimeOCRBackend  # noqa: E402
 from vie_plugin_mvs.service import MVSService  # noqa: E402
 
 
@@ -350,7 +351,9 @@ def main():
     images = resolve_inputs(args)
     input_ms = (time.perf_counter() - input_started) * 1000
     model_started = time.perf_counter()
-    backend = RecordingOCRBackend(PaddleOCRv5Backend(device=args.device))
+    backend = RecordingOCRBackend(
+        ONNXRuntimeOCRBackend.from_settings(settings, device=args.device)
+    )
     model_init_ms = (time.perf_counter() - model_started) * 1000
     service = MVSService(ocr_backend=backend)
     inspect_started = time.perf_counter()
