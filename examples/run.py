@@ -52,10 +52,20 @@ class RecordingOCRBackend:
 
     def infer(self, image):
         started = time.perf_counter()
-        tokens = self.backend.infer(image)
+        infer_with_visualization = getattr(
+            self.backend,
+            "infer_with_visualization",
+            None,
+        )
+        if callable(infer_with_visualization):
+            tokens, visualization_image = infer_with_visualization(image)
+        else:
+            tokens = self.backend.infer(image)
+            visualization_image = image
         self.calls.append(
             {
-                "image": image.copy(),
+                "source_image_shape": list(image.shape),
+                "image": visualization_image.copy(),
                 "tokens": tokens,
                 "elapsed_ms": (time.perf_counter() - started) * 1000,
                 "qr_text": None,
@@ -293,7 +303,8 @@ def dump_debug(output_dir, result, backend, timings):
         calls.append(
             {
                 "call_index": index,
-                "image_shape": list(call["image"].shape),
+                "source_image_shape": call["source_image_shape"],
+                "visualization_image_shape": list(call["image"].shape),
                 "elapsed_ms": call["elapsed_ms"],
                 "qr_elapsed_ms": call.get("qr_elapsed_ms"),
                 "qr_text": call["qr_text"],
