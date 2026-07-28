@@ -16,3 +16,9 @@
 ### 修复
 
 - 修复 `examples/run.py` 将 UVDoc 矫正坐标绘制到原图导致 OCR 框偏移的问题。
+
+### 变更
+
+- OCR 后端改为纯 ONNX Runtime 五模型流水线，移除 PaddleOCR 和 PaddleX 运行依赖。
+- GPU 模式强制校验 CUDA Execution Provider，避免静默回退到 CPU。
+- 五模型统一接入框架 InferenceRunner，并复用公共分类与 CTC 识别管线。
