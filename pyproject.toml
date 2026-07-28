@@ -8,7 +8,9 @@ version = "0.1.0"
 description = "VIE 装箱清单物料检验插件"
 requires-python = ">=3.10"
 dependencies = [
-    "paddleocr==3.7.0",
+    "numpy>=1.26,<2",
+    "onnxruntime-gpu==1.20.1",
+    "opencv-python-headless==4.11.0.86",
     "PyYAML>=6.0,<7",
     "vie-framework",
 ]
