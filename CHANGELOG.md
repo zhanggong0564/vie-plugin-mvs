@@ -5,6 +5,8 @@
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-07-28
+
 ### 新增
 
 - 新增基于 PP-OCRv5 的装箱清单与物料标签识别流程。
@@ -19,6 +21,7 @@
 
 ### 变更
 
+- 将 OCR 旋转框、裁图和排序几何操作拆为无状态模块，并保留后端原兼容入口。
 - OCR 后端改为纯 ONNX Runtime 五模型流水线，移除 PaddleOCR 和 PaddleX 运行依赖。
 - GPU 模式强制校验 CUDA Execution Provider，避免静默回退到 CPU。
 - 五模型统一接入框架 InferenceRunner，并复用公共分类与 CTC 识别管线。
