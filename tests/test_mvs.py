@@ -392,6 +392,49 @@ def test_onnx_backend_runner_failure_closes_created_runners(tmp_path):
     first_runner.close.assert_called_once_with()
 
 
+def test_business_logic_builds_backend_from_framework_settings():
+    from vie_plugin_mvs.business_logic import MVSJudgeApi
+
+    settings = _onnx_settings()
+    backend = MagicMock()
+    service = MagicMock()
+    with (
+        patch(
+            "vie_plugin_mvs.business_logic.ONNXRuntimeOCRBackend.from_settings",
+            return_value=backend,
+        ) as backend_factory,
+        patch(
+            "vie_plugin_mvs.business_logic.MVSService",
+            return_value=service,
+        ) as service_class,
+    ):
+        api = MVSJudgeApi(settings)
+
+    backend_factory.assert_called_once_with(settings)
+    service_class.assert_called_once_with(ocr_backend=backend)
+    assert api.service is service
+
+
+def test_business_logic_closes_backend_when_service_init_fails():
+    from vie_plugin_mvs.business_logic import MVSJudgeApi
+
+    backend = MagicMock()
+    with (
+        patch(
+            "vie_plugin_mvs.business_logic.ONNXRuntimeOCRBackend.from_settings",
+            return_value=backend,
+        ),
+        patch(
+            "vie_plugin_mvs.business_logic.MVSService",
+            side_effect=RuntimeError("service failed"),
+        ),
+        pytest.raises(Exception, match="MVS PP-OCRv5 模型初始化失败"),
+    ):
+        MVSJudgeApi(_onnx_settings())
+
+    backend.close.assert_called_once_with()
+
+
 def test_onnx_backend_ctc_decode_removes_blanks_and_duplicates():
     runner = SimpleNamespace(
         input_infos=[SimpleNamespace(name="x")],
