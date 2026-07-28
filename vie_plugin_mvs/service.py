@@ -10,7 +10,7 @@ from .models import (
     InspectionStatus,
     MVSResult,
 )
-from .ocr import OCRBackend, PaddleOCRv5Backend
+from .ocr import OCRBackend
 from .table_parser import FixedPackingListParser
 
 
@@ -43,7 +43,9 @@ class MVSService:
         label_inspector: OCRLabelInspector | None = None,
     ) -> None:
         self.rules = rules or load_rules()
-        self.ocr_backend = ocr_backend or PaddleOCRv5Backend()
+        if ocr_backend is None:
+            raise ValueError("MVSService 需要注入 OCRBackend")
+        self.ocr_backend = ocr_backend
         self.table_parser = FixedPackingListParser(self.rules)
         self.label_inspector = label_inspector
         self.quality_checker = ImageQualityChecker(self.rules.quality)
