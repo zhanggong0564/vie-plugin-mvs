@@ -1,0 +1,43 @@
+template:
+  columns:
+    line_no: [0.04, 0.14]
+    name: [0.14, 0.34]
+    model: [0.34, 0.57]
+    unit: [0.57, 0.68]
+    quantity: [0.68, 0.75]
+    checked: [0.75, 0.84]
+    remarks: [0.84, 1.00]
+
+quality:
+  min_blur_variance: 30.0
+  min_brightness: 25.0
+  max_brightness: 245.0
+
+items:
+  plug:
+    display_name: 堵头
+    aliases:
+      - 堵头
+      - Plug
+    code_sources:
+      - remarks
+      - model
+    code_pattern: "FQ\\d{6}"
+    inspector: ocr_label
+    required_fields:
+      - material_code
+    confidence_threshold: 0.75
+
+  direct_head:
+    display_name: 直接头
+    aliases:
+      - 直接头
+      - Direct Head
+    code_sources:
+      - remarks
+      - model
+    code_pattern: "FQ\\d{6}"
+    inspector: ocr_label
+    required_fields:
+      - material_code
+    confidence_threshold: 0.75
