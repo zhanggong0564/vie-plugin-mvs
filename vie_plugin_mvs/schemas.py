@@ -1,6 +1,7 @@
-from typing import Any, Literal
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
+from schemas import InspectionVerdict
 
 
 class MVSParams(BaseModel):
@@ -27,7 +28,8 @@ class PackingListItemResponse(BaseModel):
 
 
 class InspectionResultResponse(BaseModel):
-    status: Literal["PASS", "FAIL", "REVIEW"]
+    status: InspectionVerdict
+    verdict: InspectionVerdict
     reason: str
     matched_line_no: str | None = None
     item_key: str | None = None
@@ -41,7 +43,8 @@ class ImageInspectionResponse(BaseModel):
 
 
 class MVSResultResponse(BaseModel):
-    status: Literal["PASS", "FAIL", "REVIEW"]
+    status: InspectionVerdict
+    verdict: InspectionVerdict
     manifest_filename: str
     manifest_items: list[PackingListItemResponse] = Field(default_factory=list)
     inspections: list[ImageInspectionResponse] = Field(default_factory=list)

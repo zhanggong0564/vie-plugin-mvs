@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, call, patch
 import numpy as np
 import pytest
 
+from services.base import CoordinateSpace, Region
 from services.inference import OnnxRuntimeOptions, RunnerSpec
 from vie_plugin_mvs.config import load_rules
 from vie_plugin_mvs.inspectors import OCRLabelInspector
@@ -27,13 +28,16 @@ from vie_plugin_mvs.table_parser import FixedPackingListParser
 def token(text, x, y, score=0.95):
     return OCRToken(
         text=text,
-        confidence=score,
-        polygon=[
-            [x, y],
-            [x + 80, y],
-            [x + 80, y + 20],
-            [x, y + 20],
-        ],
+        recognition_score=score,
+        region=Region(
+            polygon=(
+                (x, y),
+                (x + 80, y),
+                (x + 80, y + 20),
+                (x, y + 20),
+            ),
+            space=CoordinateSpace.PIXEL,
+        ),
     )
 
 

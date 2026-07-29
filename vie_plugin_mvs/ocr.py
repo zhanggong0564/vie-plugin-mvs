@@ -11,6 +11,9 @@ import yaml
 from services.base import (
     BaseClassificationPipeline,
     BaseCtcRecognitionPipeline,
+    CoordinateSpace,
+    OCRToken,
+    Region,
 )
 from services.inference import (
     InferenceRunner,
@@ -22,7 +25,6 @@ from services.inference import (
 from utils import vision_logger
 
 from .model_config import MVSModelConfig
-from .models import OCRToken
 from .ocr_geometry import (
     box_score,
     crop_text,
@@ -227,8 +229,14 @@ class ONNXRuntimeOCRBackend:
         tokens = [
             OCRToken(
                 text=text.strip(),
-                confidence=float(score),
-                polygon=np.asarray(polygon, dtype=float).tolist(),
+                region=Region(
+                    polygon=tuple(
+                        (float(point[0]), float(point[1]))
+                        for point in np.asarray(polygon).reshape(-1, 2)
+                    ),
+                    space=CoordinateSpace.PIXEL,
+                ),
+                recognition_score=float(score),
             )
             for polygon, text, score in zip(polygons, texts, scores)
             if text.strip()

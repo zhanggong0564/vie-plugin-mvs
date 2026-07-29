@@ -1,25 +1,10 @@
 from dataclasses import asdict, dataclass, field
-from enum import Enum
 from typing import Any
 
-
-class InspectionStatus(str, Enum):
-    PASS = "PASS"
-    FAIL = "FAIL"
-    REVIEW = "REVIEW"
+from services.base import InspectionVerdict, OCRToken
 
 
-@dataclass(frozen=True)
-class OCRToken:
-    text: str
-    confidence: float
-    polygon: list[list[float]]
-
-    @property
-    def center(self) -> tuple[float, float]:
-        xs = [point[0] for point in self.polygon]
-        ys = [point[1] for point in self.polygon]
-        return sum(xs) / len(xs), sum(ys) / len(ys)
+InspectionStatus = InspectionVerdict
 
 
 @dataclass(frozen=True)
@@ -82,6 +67,8 @@ class MVSResult:
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         data["status"] = self.status.value
+        data["verdict"] = self.status.value
         for inspection in data["inspections"]:
             inspection["result"]["status"] = inspection["result"]["status"].value
+            inspection["result"]["verdict"] = inspection["result"]["status"]
         return data
