@@ -1,3 +1,4 @@
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, call, patch
 
@@ -47,6 +48,15 @@ def test_rules_configure_supported_items_and_code_sources():
     assert rules.items["plug"].aliases == ("堵头", "Plug")
     assert rules.items["plug"].code_sources == ("remarks", "model")
     assert rules.items["direct_head"].code_pattern == r"FQ\d{6}"
+
+
+def test_rules_path_reads_environment_override(tmp_path, monkeypatch):
+    source = Path(__file__).parents[1] / "vie_plugin_mvs" / "rules.yaml"
+    override = tmp_path / "rules.yaml"
+    override.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
+    monkeypatch.setenv("MVS_RULES_PATH", str(override))
+
+    assert load_rules().items["plug"].display_name == "堵头"
 
 
 def test_fixed_parser_reads_code_from_configured_candidate_column():
@@ -305,6 +315,15 @@ def test_model_config_requires_all_five_local_models(tmp_path):
 
     with pytest.raises(FileNotFoundError, match="PP-LCNet_x1_0_doc_ori"):
         config.validate()
+
+
+def test_model_config_reads_environment_override(tmp_path, monkeypatch):
+    override = tmp_path / "doc-orientation"
+    monkeypatch.setenv("MVS_DOC_ORIENTATION_MODEL_DIR", str(override))
+
+    config = MVSModelConfig.from_env(cwd=tmp_path)
+
+    assert config.paths["doc_orientation"] == override.resolve()
 
 
 def _onnx_model_config(tmp_path):

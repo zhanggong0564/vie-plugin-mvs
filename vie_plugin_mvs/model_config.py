@@ -1,6 +1,9 @@
-import os
 from dataclasses import dataclass
 from pathlib import Path
+
+from pydantic_settings import SettingsConfigDict
+
+from services.base import SceneSettings
 
 
 @dataclass(frozen=True)
@@ -9,6 +12,10 @@ class ModelSpec:
     model_name: str
     env_name: str
     relative_path: str
+
+    @property
+    def setting_name(self) -> str:
+        return self.env_name.removeprefix("MVS_").lower()
 
 
 MODEL_SPECS = (
@@ -45,6 +52,20 @@ MODEL_SPECS = (
 )
 
 
+class _MVSModelSettings(SceneSettings):
+    model_config = SettingsConfigDict(
+        env_prefix="MVS_",
+        env_file=".env",
+        extra="ignore",
+    )
+
+    doc_orientation_model_dir: Path | None = None
+    doc_unwarping_model_dir: Path | None = None
+    text_detection_model_dir: Path | None = None
+    textline_orientation_model_dir: Path | None = None
+    text_recognition_model_dir: Path | None = None
+
+
 @dataclass(frozen=True)
 class MVSModelConfig:
     paths: dict[str, Path]
@@ -52,9 +73,14 @@ class MVSModelConfig:
     @classmethod
     def from_env(cls, cwd: Path | None = None) -> "MVSModelConfig":
         root = cwd or Path.cwd()
+        settings = _MVSModelSettings()
         paths = {
-            spec.key: Path(
-                os.getenv(spec.env_name, str(root / spec.relative_path))
+            spec.key: (
+                getattr(
+                    settings,
+                    spec.setting_name,
+                )
+                or root / spec.relative_path
             ).resolve()
             for spec in MODEL_SPECS
         }

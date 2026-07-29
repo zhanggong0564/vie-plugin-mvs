@@ -1,9 +1,11 @@
-import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
+from pydantic_settings import SettingsConfigDict
+
+from services.base import SceneSettings
 
 
 @dataclass(frozen=True)
@@ -32,12 +34,23 @@ class MVSRules:
     quality: QualityRule
 
 
-def load_rules(path: str | None = None) -> MVSRules:
-    rule_path = Path(
-        path
-        or os.getenv("MVS_RULES_PATH")
-        or Path(__file__).with_name("rules.yaml")
+class _MVSRulesSettings(SceneSettings):
+    model_config = SettingsConfigDict(
+        env_prefix="MVS_",
+        env_file=".env",
+        extra="ignore",
     )
+
+    rules_path: Path = Path(__file__).with_name("rules.yaml")
+
+
+def load_rules(path: str | None = None) -> MVSRules:
+    settings = (
+        _MVSRulesSettings(rules_path=Path(path))
+        if path is not None
+        else _MVSRulesSettings()
+    )
+    rule_path = settings.rules_path
     try:
         raw = yaml.safe_load(rule_path.read_text(encoding="utf-8"))
     except (OSError, yaml.YAMLError) as exc:
