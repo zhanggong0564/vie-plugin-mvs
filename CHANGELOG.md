@@ -5,6 +5,13 @@
 
 ## [Unreleased]
 
+### 变更
+
+- 复用框架统一的 `InspectionVerdict` 与 `OCRToken`，保留 `InspectionStatus`
+  兼容导入；响应显式提供 `verdict`。
+- 模型目录和 `rules.yaml` 路径覆盖接入框架 `SceneSettings`，保留现有环境变量名、
+  类型化模型配置和 YAML 业务规则。
+
 ## [0.1.1] - 2026-07-28
 
 ### 新增
