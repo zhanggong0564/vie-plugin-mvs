@@ -1,8 +1,9 @@
 """MVS 装箱清单物料检验调试入口。
 
-默认使用仓库 ``demo/data/MVS`` 下的一张装箱单和一张堵头标签：
+使用包含按 ``-1`` 至 ``-5`` 命名图片的目录运行：
 
-    conda run -n mobile_vision python plugins/vie-plugin-mvs/examples/run.py
+    conda run -n mobile_vision python plugins/vie-plugin-mvs/examples/run.py \
+        --input-dir /path/to/four-images
 
 首次下载五个官方模型并运行：
 
@@ -44,6 +45,14 @@ from vie_plugin_mvs.service import MVSService  # noqa: E402
 
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".bmp"}
 EXIT_CODES = {"PASS": 0, "FAIL": 2, "REVIEW": 3}
+TARGET_NAMES = ("堵头", "直接头", "油水分离器")
+GUIDELINES = (
+    (0.0371, 0.0605, 0.5163, 0.0660, 0.5151, 0.9441, 0.0436, 0.9519),
+    (0.5157, 0.0652, 0.9784, 0.0739, 0.9772, 0.9331, 0.5210, 0.9441),
+    (0.1000, 0.3400, 0.9800, 0.3600, 0.9800, 0.7800, 0.1000, 0.7500),
+    (0.0500, 0.3000, 1.0000, 0.3600, 1.0000, 0.8000, 0.0500, 0.7400),
+    (0.0700, 0.2800, 0.9800, 0.3300, 0.9500, 0.7400, 0.0800, 0.7200),
+)
 
 
 class RecordingOCRBackend:
@@ -110,7 +119,6 @@ def parse_args():
         default=[],
         help="实物标签图片，可重复传入",
     )
-    parser.add_argument("--selected-item-key", help="指定物料 item_key")
     parser.add_argument("--device", default="gpu:0", help="例如 gpu:0 或 cpu")
     parser.add_argument(
         "--output-dir",
@@ -126,17 +134,6 @@ def parse_args():
     return parser.parse_args()
 
 
-def default_inputs():
-    return (
-        REPO_ROOT
-        / "demo/data/MVS/manifest_images/5a03d7c0-d742-408d-af83-044104f7c7f7.JPG",
-        [
-            REPO_ROOT
-            / "demo/data/MVS/images_to_inspect/01ecd42e-04cf-4c08-a3b3-0e7f6034e5ac.JPG"
-        ],
-    )
-
-
 def resolve_inputs(args):
     if args.input_dir:
         paths = sorted(
@@ -144,18 +141,16 @@ def resolve_inputs(args):
             for path in args.input_dir.iterdir()
             if path.is_file() and path.suffix.lower() in IMAGE_SUFFIXES
         )
-        if len(paths) < 2:
-            raise SystemExit("--input-dir 至少需要两张图片")
+        if len(paths) != 4:
+            raise SystemExit("--input-dir 必须恰好包含四张图片")
         return [(path.name, read_image(path)) for path in paths]
 
     if args.manifest:
-        if not args.label:
-            raise SystemExit("--manifest 必须至少配合一个 --label")
+        if len(args.label) != 3:
+            raise SystemExit("--manifest 必须配合三个按业务顺序提供的 --label")
         manifest, labels = args.manifest, args.label
     else:
-        if args.label:
-            raise SystemExit("单独使用 --label 时必须同时指定 --manifest")
-        manifest, labels = default_inputs()
+        raise SystemExit("必须提供 --input-dir，或同时提供 --manifest 和三个 --label")
 
     images = [("mvs-1" + manifest.suffix.lower(), read_image(manifest))]
     images.extend(
@@ -360,7 +355,8 @@ def main():
     try:
         result = service.inspect(
             images,
-            selected_item_key=args.selected_item_key,
+            TARGET_NAMES,
+            GUIDELINES,
         )
         timings = {
             "input_load": input_ms,

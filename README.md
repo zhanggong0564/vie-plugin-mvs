@@ -1,17 +1,21 @@
 # MVS 装箱清单物料检验插件
 
 插件通过 `vie.plugins` 注册 `/api/v1/mvs_inspect` 多图片接口。上传图片文件名必须以
-`-序号` 结尾，`-1` 是装箱清单，`-2` 起是待检物料标签。
+`-序号` 结尾，并完整提供 `-1` 至 `-4`：`-1` 是左右两份装箱清单，`-2` 至
+`-4` 依次对应 `target_names` 中的三个待检物料标签。
 
 ```bash
 curl -X POST http://127.0.0.1:3001/api/v1/mvs_inspect \
   -F 'files=@packing-1.jpg' \
   -F 'files=@packing-2.jpg' \
-  -F 'json_data={"selected_item_key":"plug"}'
+  -F 'files=@packing-3.jpg' \
+  -F 'files=@packing-4.jpg' \
+  -F 'json_data=<test.json'
 ```
 
-`selected_item_key` 可省略，省略时按物料编码和名称自动匹配清单项目。响应中的业务
-状态为 `PASS`、`FAIL` 或 `REVIEW`。
+`modelParams.target_names` 必须提供三个有序检测项；`guideline_coordinates`
+必须提供五组归一化四顶点，前两组裁剪左右清单，后三组过滤图片 `-2` 至 `-4`
+的 OCR 文字框。响应中的业务状态为 `PASS`、`FAIL` 或 `REVIEW`。
 
 ## 运行依赖
 
@@ -36,14 +40,26 @@ conda run -n mobile_vision python plugins/vie-plugin-mvs/examples/run.py \
 
 ```bash
 conda run -n mobile_vision python plugins/vie-plugin-mvs/examples/run.py \
-  --manifest demo/data/MVS/manifest_images/5a03d7c0-d742-408d-af83-044104f7c7f7.JPG \
-  --label demo/data/MVS/images_to_inspect/01ecd42e-04cf-4c08-a3b3-0e7f6034e5ac.JPG
+  --manifest demo/data/MVS/manifest_images/lQDPJws1TeiPbhvND6DNC7iwmr6EaAnYPSQKP0Joak1aAA_3000_4000.png \
+  --label demo/data/MVS/images_to_inspect/01ecd42e-04cf-4c08-a3b3-0e7f6034e5ac.JPG \
+  --label demo/data/MVS/images_to_inspect/0b6f7312-8a83-47f3-8484-8e90b263a6ea.JPG \
+  --label demo/data/MVS/images_to_inspect/af104e9f-2915-4b7c-b30f-48f80526a918.JPG
 ```
 
-也可以用 `--input-dir` 读取按 `-1/-2/...` 命名的图片序列，并通过
-`--selected-item-key`、`--device`、`--output-dir` 调整场景。输出目录包含
+`--input-dir` 读取按 `-1` 至 `-4` 命名的图片序列，并可通过 `--device`、
+`--output-dir` 调整场景。输出目录包含
 `result.json`、每次 OCR 的 token JSON、二维码内容、框选图和阶段耗时。
 退出码分别为 PASS=`0`、FAIL=`2`、REVIEW=`3`。
+
+需要人工调整双清单引导线时，可启动浏览器编辑器：
+
+```bash
+conda run -n mobile_vision python \
+  plugins/vie-plugin-mvs/examples/guideline_editor.py
+```
+
+打开 `http://127.0.0.1:8011`，拖动左右清单的四个角点；页面底部会实时生成
+包含三张标签坐标的完整 `guideline_coordinates`。
 
 可使用以下环境变量：
 
