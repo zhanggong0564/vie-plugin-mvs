@@ -29,7 +29,12 @@ class MVSJudgeApi(BatchBusinessLogicBase):
             ) from exc
 
     def inspect_batch(self, images, request_params):
-        return self.service.inspect(images, request_params.selected_item_key)
+        model_params = request_params.modelParams
+        return self.service.inspect(
+            images,
+            model_params.target_names,
+            model_params.guideline_coordinates,
+        )
 
     def close(self) -> None:
         self.service.close()

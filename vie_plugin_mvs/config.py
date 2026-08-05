@@ -31,7 +31,19 @@ class QualityRule:
 class MVSRules:
     items: dict[str, ItemRule]
     columns: dict[str, tuple[float, float]]
+    column_headers: dict[str, tuple[str, ...]]
     quality: QualityRule
+
+    def item_key_for_name(self, name: str) -> str | None:
+        normalized = name.strip().casefold()
+        for key, rule in self.items.items():
+            names = (rule.display_name, *rule.aliases)
+            if any(
+                normalized == candidate.strip().casefold()
+                for candidate in names
+            ):
+                return key
+        return None
 
 
 class _MVSRulesSettings(SceneSettings):
@@ -66,6 +78,7 @@ def load_rules(path: str | None = None) -> MVSRules:
         raise ValueError("MVS 规则配置缺少 template、quality 或 items") from exc
 
     columns = {}
+    column_headers = {}
     for name in (
         "line_no",
         "name",
@@ -83,6 +96,14 @@ def load_rules(path: str | None = None) -> MVSRules:
         ):
             raise ValueError(f"MVS 列范围非法: {name}")
         columns[name] = (float(bounds[0]), float(bounds[1]))
+        aliases = raw["template"].get("headers", {}).get(name)
+        if (
+            not isinstance(aliases, list)
+            or not aliases
+            or any(not str(alias).strip() for alias in aliases)
+        ):
+            raise ValueError(f"MVS 表头别名非法: {name}")
+        column_headers[name] = tuple(str(alias) for alias in aliases)
 
     items = {}
     for item_key, value in raw_items.items():
@@ -118,4 +139,9 @@ def load_rules(path: str | None = None) -> MVSRules:
         )
     except (KeyError, TypeError, ValueError) as exc:
         raise ValueError("MVS 图像质量规则非法") from exc
-    return MVSRules(items=items, columns=columns, quality=quality)
+    return MVSRules(
+        items=items,
+        columns=columns,
+        column_headers=column_headers,
+        quality=quality,
+    )

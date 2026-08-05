@@ -1,12 +1,20 @@
 template:
   columns:
-    line_no: [0.04, 0.14]
+    line_no: [0.00, 0.14]
     name: [0.14, 0.34]
     model: [0.34, 0.57]
     unit: [0.57, 0.68]
     quantity: [0.68, 0.75]
     checked: [0.75, 0.84]
     remarks: [0.84, 1.00]
+  headers:
+    line_no: [序号, serial no, item no]
+    name: [名称, name]
+    model: [型号, model]
+    unit: [单位, unit]
+    quantity: [数量, qty, quantity]
+    checked: [核对, checked by]
+    remarks: [备注, remarks]
 
 quality:
   min_blur_variance: 30.0
@@ -33,6 +41,21 @@ items:
     aliases:
       - 直接头
       - Direct Head
+    code_sources:
+      - remarks
+      - model
+    code_pattern: "FQ\\d{6}"
+    inspector: ocr_label
+    required_fields:
+      - material_code
+    confidence_threshold: 0.75
+
+  oil_water_separator:
+    display_name: 油水分离器
+    aliases:
+      - 油水分离器
+      - Oil-water separator
+      - Oil water separator
     code_sources:
       - remarks
       - model

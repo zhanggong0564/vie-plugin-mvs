@@ -26,9 +26,23 @@ class MaterialMatcher:
         if observation.multiple_labels or len(observation.detected_codes) > 1:
             return self._review("一张图片中识别到多个物料编码", actual)
 
+        qr_patterns = (
+            (self.rules.items[selected_item_key].code_pattern,)
+            if selected_item_key
+            else tuple(
+                dict.fromkeys(
+                    rule.code_pattern for rule in self.rules.items.values()
+                )
+            )
+        )
         qr_codes = tuple(
             dict.fromkeys(
-                re.findall(r"FQ\d{6}", (observation.qr_text or "").upper())
+                match.group(0)
+                for pattern in qr_patterns
+                for match in re.finditer(
+                    pattern,
+                    (observation.qr_text or "").upper(),
+                )
             )
         )
         if len(qr_codes) > 1:

@@ -11,13 +11,13 @@ class MVSRouter(BaseBatchRouter):
             api_path="/mvs_inspect",
             summary="装箱清单物料检验",
             description=(
-                "按文件名 -1、-2、-3 顺序上传；"
-                "-1 为装箱清单，其余为实物标签。"
+                "固定上传按文件名 -1 至 -4 编号的四张图片；"
+                "-1 为左右装箱清单，-2 至 -4 为三个实物标签。"
             ),
             detector_type="mvs",
             tag="装箱清单物料检验",
             response_model=MVSResponse,
-            min_files=2,
+            min_files=4,
         )
 
     def request_schema(self, json_dict):

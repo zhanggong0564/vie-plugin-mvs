@@ -56,13 +56,14 @@ class OCRLabelInspector:
         expected_item: PackingListItem | None,
         backend: OCRBackend,
     ) -> LabelObservation:
-        del expected_item
         quality = self.quality_checker.check(image)
         tokens = backend.infer(image)
+        selected_item_key = expected_item.item_key if expected_item else None
         observation = self.extract_tokens(
             tokens,
             qr_text=backend.decode_qr(image),
             review_reasons=quality.reasons,
+            selected_item_key=selected_item_key,
         )
         min_threshold = min(
             rule.confidence_threshold for rule in self.rules.items.values()
@@ -78,6 +79,53 @@ class OCRLabelInspector:
                 qr_text=observation.qr_text,
                 review_reasons=quality.reasons,
                 multiple_labels=observation.multiple_labels,
+                selected_item_key=selected_item_key,
+            )
+        return observation
+
+    def extract_guided(
+        self,
+        image: np.ndarray,
+        expected_item: PackingListItem | None,
+        backend: OCRBackend,
+        guideline: tuple[float, ...],
+        overlap_threshold: float = 0.9,
+        selected_item_key: str | None = None,
+    ) -> LabelObservation:
+        quality = self.quality_checker.check(image)
+        tokens = self.filter_tokens(
+            backend.infer(image),
+            guideline,
+            image.shape[1],
+            image.shape[0],
+            overlap_threshold,
+        )
+        selected_item_key = (
+            selected_item_key
+            or (expected_item.item_key if expected_item else None)
+        )
+        qr_crop = self._guideline_crop(image, guideline)
+        observation = self.extract_tokens(
+            tokens,
+            qr_text=backend.decode_qr(qr_crop),
+            review_reasons=quality.reasons,
+            selected_item_key=selected_item_key,
+        )
+        min_threshold = min(
+            rule.confidence_threshold for rule in self.rules.items.values()
+        )
+        if tokens and (
+            observation.material_code is None
+            or observation.confidence < min_threshold
+        ):
+            crop = self._crop_and_enhance(image, tokens)
+            retry_tokens = backend.infer(crop)
+            observation = self.extract_tokens(
+                [*tokens, *retry_tokens],
+                qr_text=observation.qr_text,
+                review_reasons=quality.reasons,
+                multiple_labels=observation.multiple_labels,
+                selected_item_key=selected_item_key,
             )
         return observation
 
@@ -87,12 +135,38 @@ class OCRLabelInspector:
         qr_text: str | None = None,
         review_reasons: tuple[str, ...] = (),
         multiple_labels: bool | None = None,
+        selected_item_key: str | None = None,
     ) -> LabelObservation:
         raw_texts = tuple(token.text for token in tokens)
+        name_matches = []
+        name_scores = []
+        matched_rules = []
+        candidate_rules = (
+            (self.rules.items[selected_item_key],)
+            if selected_item_key
+            else tuple(self.rules.items.values())
+        )
+        for token in tokens:
+            for rule in candidate_rules:
+                if any(
+                    alias.casefold() in token.text.casefold()
+                    for alias in rule.aliases
+                ):
+                    name_matches.append(rule.display_name)
+                    name_scores.append(token.confidence)
+                    matched_rules.append(rule)
+        unique_names = tuple(dict.fromkeys(name_matches))
+        item_name = unique_names[0] if len(unique_names) == 1 else None
+
         detected_codes = []
         code_scores = []
+        selected_rules = (
+            tuple(dict.fromkeys(matched_rules))
+            if not selected_item_key and len(set(name_matches)) == 1
+            else candidate_rules
+        )
         code_patterns = tuple(
-            dict.fromkeys(rule.code_pattern for rule in self.rules.items.values())
+            dict.fromkeys(rule.code_pattern for rule in selected_rules)
         )
         for token in tokens:
             for pattern in code_patterns:
@@ -112,18 +186,6 @@ class OCRLabelInspector:
                 if corrected != raw and re.fullmatch(r"FQ\d{6}", corrected):
                     candidates.append(corrected)
 
-        name_matches = []
-        name_scores = []
-        for token in tokens:
-            for rule in self.rules.items.values():
-                if any(
-                    alias.casefold() in token.text.casefold()
-                    for alias in rule.aliases
-                ):
-                    name_matches.append(rule.display_name)
-                    name_scores.append(token.confidence)
-        unique_names = tuple(dict.fromkeys(name_matches))
-        item_name = unique_names[0] if len(unique_names) == 1 else None
         relevant_scores = [*code_scores, *name_scores]
         confidence = (
             sum(relevant_scores) / len(relevant_scores)
@@ -143,6 +205,51 @@ class OCRLabelInspector:
             multiple_labels=multiple_labels,
             review_reasons=review_reasons,
         )
+
+    @staticmethod
+    def filter_tokens(
+        tokens: list[OCRToken],
+        guideline: tuple[float, ...],
+        image_width: int,
+        image_height: int,
+        overlap_threshold: float,
+    ) -> list[OCRToken]:
+        roi = np.asarray(
+            [
+                (
+                    guideline[index] * image_width,
+                    guideline[index + 1] * image_height,
+                )
+                for index in range(0, 8, 2)
+            ],
+            dtype=np.float32,
+        )
+        kept = []
+        for token in tokens:
+            polygon = np.asarray(token.polygon, dtype=np.float32)
+            area = cv2.contourArea(polygon)
+            if area <= 0:
+                continue
+            intersection, _ = cv2.intersectConvexConvex(polygon, roi)
+            overlap_ratio = min(1.0, intersection / area)
+            if intersection > 0 and overlap_ratio >= overlap_threshold:
+                kept.append(token)
+        return kept
+
+    @staticmethod
+    def _guideline_crop(
+        image: np.ndarray,
+        guideline: tuple[float, ...],
+    ) -> np.ndarray:
+        width = image.shape[1]
+        height = image.shape[0]
+        xs = guideline[::2]
+        ys = guideline[1::2]
+        left = max(0, int(np.floor(min(xs) * width)))
+        top = max(0, int(np.floor(min(ys) * height)))
+        right = min(width, int(np.ceil(max(xs) * width)))
+        bottom = min(height, int(np.ceil(max(ys) * height)))
+        return image[top:bottom, left:right]
 
     def evaluate(
         self,
