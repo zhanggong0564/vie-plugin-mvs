@@ -22,8 +22,21 @@ from vie_plugin_mvs.ocr import (
     _PPocrRecognitionPipeline,
 )
 from vie_plugin_mvs.plugin import mvs_router
+from vie_plugin_mvs.schemas import MVSParams
 from vie_plugin_mvs.service import MVSService, order_images
 from vie_plugin_mvs.table_parser import FixedPackingListParser
+
+
+TARGET_NAMES = ("堵头", "直接头", "油水分离器")
+FULL_GUIDELINES = tuple(
+    (0.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0)
+    for _ in range(5)
+)
+SERVICE_GUIDELINES = (
+    FULL_GUIDELINES[0],
+    (0.5, 0.0, 1.0, 0.0, 1.0, 1.0, 0.5, 1.0),
+    *FULL_GUIDELINES[2:],
+)
 
 
 def token(text, x, y, score=0.95):
@@ -48,6 +61,54 @@ def test_rules_configure_supported_items_and_code_sources():
     assert rules.items["plug"].aliases == ("堵头", "Plug")
     assert rules.items["plug"].code_sources == ("remarks", "model")
     assert rules.items["direct_head"].code_pattern == r"FQ\d{6}"
+    assert rules.item_key_for_name("Oil-water separator") == "oil_water_separator"
+
+
+def test_request_parses_three_targets_and_five_normalized_quadrilaterals():
+    guideline = ";".join(
+        "0.1,0.1,0.9,0.1,0.9,0.9,0.1,0.9" for _ in range(5)
+    )
+
+    request = MVSParams(
+        modelParams={
+            "product_type": "PackingList",
+            "target_names": "堵头,直接头,油水分离器",
+            "guideline_coordinates": guideline,
+        }
+    )
+
+    assert request.modelParams.target_names == TARGET_NAMES
+    assert len(request.modelParams.guideline_coordinates) == 5
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("target_names", "堵头,直接头", "3 个检测项"),
+        (
+            "guideline_coordinates",
+            "0.1,0.1,0.9,0.1,0.9,0.9,0.1,0.9",
+            "5 组四边形",
+        ),
+        (
+            "guideline_coordinates",
+            ";".join("0.1,0.1,0.9,0.9,0.9,0.1,0.1,0.9" for _ in range(5)),
+            "顶点顺序",
+        ),
+    ],
+)
+def test_request_rejects_invalid_four_image_contract(field, value, message):
+    data = {
+        "product_type": "PackingList",
+        "target_names": ",".join(TARGET_NAMES),
+        "guideline_coordinates": ";".join(
+            "0.1,0.1,0.9,0.1,0.9,0.9,0.1,0.9" for _ in range(5)
+        ),
+    }
+    data[field] = value
+
+    with pytest.raises(ValueError, match=message):
+        MVSParams(modelParams=data)
 
 
 def test_rules_path_reads_environment_override(tmp_path, monkeypatch):
@@ -84,10 +145,110 @@ def test_fixed_parser_reads_code_from_configured_candidate_column():
 
     assert [(item.item_key, item.material_code_source) for item in items] == [
         ("plug", "remarks"),
+        ("oil_water_separator", None),
         ("direct_head", "model"),
     ]
     assert items[0].material_code == "FQ001811"
-    assert items[1].material_code == "FQ001767"
+    assert items[2].material_code == "FQ001767"
+
+
+def test_fixed_parser_accepts_line_number_near_cropped_page_edge():
+    rules = load_rules()
+    parser = FixedPackingListParser(rules)
+    tokens = [
+        token("20", 20, 500),
+        token("堵头", 220, 500),
+        token("1", 700, 500),
+        token("FQ001811", 900, 500),
+    ]
+
+    items = parser.parse(tokens, image_width=1000, image_height=1000)
+
+    assert [(item.item_key, item.material_code) for item in items] == [
+        ("plug", "FQ001811")
+    ]
+
+
+def test_parser_uses_complete_header_to_follow_shifted_table_columns():
+    rules = load_rules()
+    parser = FixedPackingListParser(rules)
+
+    def shifted(normalized_x):
+        return (0.10 + 0.75 * normalized_x) * 1000 - 40
+
+    headers = {
+        "line_no": "序号",
+        "name": "名称/Name",
+        "model": "型号/Model",
+        "unit": "单位/Unit",
+        "quantity": "数量/qty.",
+        "checked": "核对/checked by",
+        "remarks": "备注/remarks",
+    }
+    tokens = [
+        token(
+            headers[name],
+            shifted(sum(rules.columns[name]) / 2),
+            200,
+        )
+        for name in rules.columns
+    ]
+    tokens.append(token("总箱数 total Qty.", shifted(0.70), 100))
+    tokens.extend(
+        [
+            token("20", shifted(0.09), 500),
+            token("堵头/Plug", shifted(0.24), 500),
+            token("个/pcs", shifted(0.625), 500),
+            token("1", shifted(0.715), 500),
+            token("FQ001811", shifted(0.92), 500),
+        ]
+    )
+
+    items = parser.parse(tokens, image_width=1000, image_height=1000)
+
+    assert len(items) == 1
+    assert items[0].item_key == "plug"
+    assert items[0].material_code == "FQ001811"
+    assert items[0].material_code_source == "remarks"
+
+
+def test_parser_falls_back_when_headers_are_not_in_column_order():
+    rules = load_rules()
+    parser = FixedPackingListParser(rules)
+    header_xs = {
+        name: sum(bounds) / 2 * 1000 - 40
+        for name, bounds in rules.columns.items()
+    }
+    header_xs["quantity"], header_xs["checked"] = (
+        header_xs["checked"],
+        header_xs["quantity"],
+    )
+    headers = {
+        "line_no": "序号",
+        "name": "名称",
+        "model": "型号",
+        "unit": "单位",
+        "quantity": "数量",
+        "checked": "核对",
+        "remarks": "备注",
+    }
+    tokens = [
+        token(headers[name], header_xs[name], 200) for name in rules.columns
+    ]
+    tokens.extend(
+        [
+            token("20", 80, 500),
+            token("堵头", 220, 500),
+            token("个/pcs", 620, 500),
+            token("1", 700, 500),
+            token("FQ001811", 900, 500),
+        ]
+    )
+
+    items = parser.parse(tokens, image_width=1000, image_height=1000)
+
+    assert len(items) == 1
+    assert items[0].material_code == "FQ001811"
 
 
 def test_label_inspector_keeps_confusion_as_candidate_only():
@@ -129,6 +290,61 @@ def test_label_inspector_retries_crop_without_promoting_candidate_directly():
     assert len(calls) == 2
     assert observation.material_code == "FQ001811"
     assert observation.code_candidates == ("FQ001811",)
+
+
+def test_label_inspector_filters_tokens_by_guideline_overlap():
+    rules = load_rules()
+    inspector = OCRLabelInspector(rules)
+    tokens = [
+        token("FQ001811", 20, 20),
+        token("OUTSIDE", 400, 400),
+        token("PARTIAL", 170, 40),
+    ]
+    guideline = (0.0, 0.0, 0.2, 0.0, 0.2, 0.2, 0.0, 0.2)
+
+    filtered = inspector.filter_tokens(tokens, guideline, 1000, 1000, 0.9)
+
+    assert [item.text for item in filtered] == ["FQ001811"]
+
+
+def test_guided_inspector_decodes_qr_from_guideline_outer_crop():
+    rules = load_rules()
+    inspector = OCRLabelInspector(rules)
+    backend = SimpleNamespace(
+        infer=lambda image: [token("FQ001811", 20, 20)],
+        decode_qr=MagicMock(return_value="FQ001811"),
+    )
+    image = np.random.default_rng(11).integers(
+        40, 220, (100, 200, 3), dtype=np.uint8
+    )
+
+    inspector.extract_guided(
+        image,
+        expected_item=None,
+        backend=backend,
+        guideline=(0.1, 0.2, 0.6, 0.2, 0.6, 0.8, 0.1, 0.8),
+        selected_item_key="plug",
+    )
+
+    assert backend.decode_qr.call_args.args[0].shape == (60, 100, 3)
+
+
+def test_manifest_outer_crop_uses_quadrilateral_bounds():
+    image = np.zeros((3000, 4000, 3), dtype=np.uint8)
+    guideline = (
+        0.0371,
+        0.0605,
+        0.5163,
+        0.0660,
+        0.5151,
+        0.9441,
+        0.0436,
+        0.9519,
+    )
+
+    crop = MVSService._outer_crop(image, guideline)
+
+    assert crop.shape[:2] == (2675, 1918)
 
 
 def test_matcher_returns_pass_fail_and_review():
@@ -242,7 +458,8 @@ def test_matcher_reviews_qr_ocr_conflict_and_multiple_labels():
 
 def test_order_images_requires_manifest_suffix_and_sorts_numerically():
     images = [
-        ("batch-10.jpg", np.zeros((10, 10, 3), dtype=np.uint8)),
+        ("batch-4.jpg", np.zeros((10, 10, 3), dtype=np.uint8)),
+        ("batch-3.jpg", np.zeros((10, 10, 3), dtype=np.uint8)),
         ("batch-2.jpg", np.zeros((10, 10, 3), dtype=np.uint8)),
         ("batch-1.jpg", np.zeros((10, 10, 3), dtype=np.uint8)),
     ]
@@ -252,8 +469,37 @@ def test_order_images_requires_manifest_suffix_and_sorts_numerically():
     assert [name for name, _ in ordered] == [
         "batch-1.jpg",
         "batch-2.jpg",
-        "batch-10.jpg",
+        "batch-3.jpg",
+        "batch-4.jpg",
     ]
+
+
+@pytest.mark.parametrize(
+    "names",
+    [
+        ("batch-1.jpg", "batch-2.jpg"),
+        (
+            "batch-1.jpg",
+            "batch-2.jpg",
+            "batch-3.jpg",
+            "batch-5.jpg",
+        ),
+        (
+            "batch-1.jpg",
+            "batch-2.jpg",
+            "batch-3.jpg",
+            "other-3.jpg",
+        ),
+    ],
+)
+def test_order_images_requires_exactly_one_of_each_sequence(names):
+    images = [
+        (name, np.zeros((10, 10, 3), dtype=np.uint8))
+        for name in names
+    ]
+
+    with pytest.raises(ValueError):
+        order_images(images)
 
 
 def test_service_uses_first_image_as_manifest_and_inspects_remaining():
@@ -264,31 +510,61 @@ def test_service_uses_first_image_as_manifest_and_inspects_remaining():
         token("Plug", 220, 525),
         token("1", 750, 500),
         token("FQ001811", 900, 500),
+        token("21", 80, 600),
+        token("直接头", 220, 600),
+        token("FQ001767", 500, 600),
+        token("1", 750, 600),
+        token("22", 80, 700),
+        token("油水分离器", 220, 700),
+        token("KIT PIT410", 500, 700),
+        token("1", 750, 700),
+        token("FQ001607", 900, 700),
     ]
-    label_tokens = [
-        token("8200006184_FQ001811_260708", 100, 100),
-        token("堵头", 100, 130),
-    ]
+    label_tokens = {
+        2: [token("FQ001811", 100, 100), token("堵头", 100, 130)],
+        3: [token("FQ001767", 100, 100), token("直接头", 100, 130)],
+        4: [token("FQ001607", 100, 100), token("油水分离器", 100, 130)],
+    }
     backend = SimpleNamespace(
-        infer=lambda image: manifest_tokens if image[0, 0, 0] == 1 else label_tokens,
+        infer=lambda image: (
+            manifest_tokens
+            if image[0, 0, 0] == 1
+            else (
+                []
+                if image[0, 0, 0] == 6
+                else label_tokens[int(image[0, 0, 0])]
+            )
+        ),
         decode_qr=lambda image: None,
     )
     service = MVSService(rules=rules, ocr_backend=backend)
     rng = np.random.default_rng(7)
     manifest_image = rng.integers(40, 220, (1000, 1000, 3), dtype=np.uint8)
-    label_image = rng.integers(40, 220, (1000, 1000, 3), dtype=np.uint8)
-    manifest_image[0, 0, 0] = 1
-    label_image[0, 0, 0] = 2
+    manifest_image[:, :500, 0] = 1
+    manifest_image[:, 500:, 0] = 6
+    label_images = []
+    for marker in range(2, 5):
+        image = rng.integers(40, 220, (1000, 1000, 3), dtype=np.uint8)
+        image[:, :, 0] = marker
+        label_images.append(image)
 
     result = service.inspect(
         [
-            ("batch-2.jpg", label_image),
+            ("batch-3.jpg", label_images[1]),
             ("batch-1.jpg", manifest_image),
-        ]
+            ("batch-4.jpg", label_images[2]),
+            ("batch-2.jpg", label_images[0]),
+        ],
+        TARGET_NAMES,
+        SERVICE_GUIDELINES,
     )
 
     assert result.manifest_items[0].material_code == "FQ001811"
-    assert result.inspections[0].status is InspectionStatus.PASS
+    assert [inspection.status for inspection in result.inspections] == [
+        InspectionStatus.PASS,
+        InspectionStatus.PASS,
+        InspectionStatus.PASS,
+    ]
 
 
 def test_service_reviews_bad_manifest_before_ocr():
@@ -303,7 +579,11 @@ def test_service_reviews_bad_manifest_before_ocr():
         [
             ("batch-1.jpg", np.zeros((100, 100, 3), dtype=np.uint8)),
             ("batch-2.jpg", np.zeros((100, 100, 3), dtype=np.uint8)),
-        ]
+            ("batch-3.jpg", np.zeros((100, 100, 3), dtype=np.uint8)),
+            ("batch-4.jpg", np.zeros((100, 100, 3), dtype=np.uint8)),
+        ],
+        TARGET_NAMES,
+        FULL_GUIDELINES,
     )
 
     assert result.status is InspectionStatus.REVIEW
