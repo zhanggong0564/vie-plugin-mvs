@@ -256,8 +256,10 @@ class FixedPackingListParser:
         index = 0
         while index < len(source) - 2 and value > source[index + 1]:
             index += 1
-        source_left, source_right = source[index : index + 2]
-        target_left, target_right = target[index : index + 2]
+        source_left = source[index]
+        source_right = source[index + 1]
+        target_left = target[index]
+        target_right = target[index + 1]
         ratio = (value - source_left) / (source_right - source_left)
         return target_left + ratio * (target_right - target_left)
 
