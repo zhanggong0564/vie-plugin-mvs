@@ -5,6 +5,13 @@
 
 ## [Unreleased]
 
+### 修复
+
+- 补齐与其他场景插件一致的 Cython 二进制 wheel 构建入口，避免 MVS 发布镜像
+  准备构建上下文时因缺少 `setup.py` 中断，并防止业务源码以明文形式进入 wheel。
+- 避免动态列表切片解包触发 Cython 编译器内部断言，确保表格插值模块可正常
+  编译为扩展模块。
+
 ### 变更
 
 - 复用框架统一的 `InspectionVerdict` 与 `OCRToken`，保留 `InspectionStatus`
