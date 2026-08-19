@@ -14,6 +14,10 @@
 
 ### 变更
 
+- `/api/v1/mvs_inspect` 改为每次接收一个 `file` 并即时返回统一检测响应；按文件名
+  倒数第二段解析动态图片序号，以 SN 缓存清单结果供后续实物标签逐张比对。
+- `target_names` 和引导区域改为按规则配置动态校验，图片数为检测项目数加一，
+  引导区域数为检测项目数加二。
 - 复用框架统一的 `InspectionVerdict` 与 `OCRToken`，保留 `InspectionStatus`
   兼容导入；响应显式提供 `verdict`。
 - 模型目录和 `rules.yaml` 路径覆盖接入框架 `SceneSettings`，保留现有环境变量名、
