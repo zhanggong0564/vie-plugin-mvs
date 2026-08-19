@@ -7,7 +7,8 @@ import pytest
 
 from services.base import CoordinateSpace, Region
 from services.inference import OnnxRuntimeOptions, RunnerSpec
-from vie_plugin_mvs.config import load_rules
+from schemas.exceptions import InvalidParamsError
+from vie_plugin_mvs.config import MVSSettings, load_rules
 from vie_plugin_mvs.inspectors import OCRLabelInspector
 from vie_plugin_mvs.matcher import MaterialMatcher
 from vie_plugin_mvs.model_config import MODEL_SPECS, MVSModelConfig
@@ -23,7 +24,11 @@ from vie_plugin_mvs.ocr import (
 )
 from vie_plugin_mvs.plugin import mvs_router
 from vie_plugin_mvs.schemas import MVSParams
-from vie_plugin_mvs.service import MVSService, order_images
+from vie_plugin_mvs.service import (
+    MVSService,
+    order_images,
+    parse_single_image_name,
+)
 from vie_plugin_mvs.table_parser import FixedPackingListParser
 
 
@@ -70,6 +75,7 @@ def test_request_parses_three_targets_and_five_normalized_quadrilaterals():
     )
 
     request = MVSParams(
+        sn="SN001",
         modelParams={
             "product_type": "PackingList",
             "target_names": "堵头,直接头,油水分离器",
@@ -84,7 +90,7 @@ def test_request_parses_three_targets_and_five_normalized_quadrilaterals():
 @pytest.mark.parametrize(
     ("field", "value", "message"),
     [
-        ("target_names", "堵头,直接头", "3 个检测项"),
+        ("target_names", "堵头,堵头", "不能重复"),
         (
             "guideline_coordinates",
             "0.1,0.1,0.9,0.1,0.9,0.9,0.1,0.9",
@@ -108,7 +114,51 @@ def test_request_rejects_invalid_four_image_contract(field, value, message):
     data[field] = value
 
     with pytest.raises(ValueError, match=message):
-        MVSParams(modelParams=data)
+        MVSParams(sn="SN001", modelParams=data)
+
+
+def test_request_accepts_dynamic_targets_and_full_business_payload():
+    request = MVSParams(
+        sn="SN001",
+        product="PackingList",
+        type="",
+        AICameraModel=None,
+        custom_field="透传",
+        modelParams={
+            "product_type": "PackingList",
+            "target_names": "堵头",
+            "guideline_coordinates": ";".join(
+                "0.1,0.1,0.9,0.1,0.9,0.9,0.1,0.9" for _ in range(3)
+            ),
+        },
+    )
+
+    assert request.modelParams.target_names == ("堵头",)
+    assert len(request.modelParams.guideline_coordinates) == 3
+
+
+def test_single_image_filename_uses_penultimate_number_as_sequence():
+    parsed = parse_single_image_name(
+        "中压-MVS包装-AI拍照-1-1785457380050.jpg"
+    )
+
+    assert parsed.prefix == "中压-MVS包装-AI拍照"
+    assert parsed.sequence == 1
+    assert parsed.timestamp == "1785457380050"
+
+
+@pytest.mark.parametrize(
+    "filename",
+    [
+        "中压-MVS包装-AI拍照-1.jpg",
+        "中压-MVS包装-AI拍照-1785457380050.jpg",
+        "-1-1785457380050.jpg",
+        "中压-MVS包装-AI拍照-0-1785457380050.jpg",
+    ],
+)
+def test_single_image_filename_rejects_invalid_contract(filename):
+    with pytest.raises(InvalidParamsError, match="图片文件名必须"):
+        parse_single_image_name(filename)
 
 
 def test_rules_path_reads_environment_override(tmp_path, monkeypatch):
@@ -118,6 +168,16 @@ def test_rules_path_reads_environment_override(tmp_path, monkeypatch):
     monkeypatch.setenv("MVS_RULES_PATH", str(override))
 
     assert load_rules().items["plug"].display_name == "堵头"
+
+
+def test_session_ttl_reads_typed_environment_override(monkeypatch):
+    monkeypatch.setenv("MVS_SESSION_TTL_SECONDS", "60")
+
+    assert MVSSettings().session_ttl_seconds == 60
+
+    monkeypatch.setenv("MVS_SESSION_TTL_SECONDS", "0")
+    with pytest.raises(ValueError):
+        MVSSettings()
 
 
 def test_fixed_parser_reads_code_from_configured_candidate_column():
@@ -566,6 +626,125 @@ def test_service_uses_first_image_as_manifest_and_inspects_remaining():
         InspectionStatus.PASS,
     ]
 
+    request = MVSParams(
+        sn="SN001",
+        modelParams={
+            "product_type": "PackingList",
+            "target_names": TARGET_NAMES,
+            "guideline_coordinates": SERVICE_GUIDELINES,
+        },
+    )
+    manifest_response = service.inspect_single(
+        "中压-MVS包装-AI拍照-1-1785457380050.jpg",
+        manifest_image,
+        request,
+    )
+    label_responses = [
+        service.inspect_single(
+            f"中压-MVS包装-AI拍照-{index}-17854573800{index}0.jpg",
+            image,
+            request,
+        )
+        for index, image in enumerate(label_images, start=2)
+    ]
+
+    assert manifest_response["verdict"] == "PASS"
+    assert [item["scene"] for item in manifest_response["detailList"]] == list(
+        TARGET_NAMES
+    )
+    assert [item["name"] for item in manifest_response["detailList"]] == [
+        "FQ001811",
+        "FQ001767",
+        "FQ001607",
+    ]
+    assert [response["verdict"] for response in label_responses] == [
+        "PASS",
+        "PASS",
+        "PASS",
+    ]
+
+    mismatched_request = MVSParams(
+        sn="SN001",
+        modelParams={
+            "product_type": "OtherPackingList",
+            "target_names": TARGET_NAMES,
+            "guideline_coordinates": SERVICE_GUIDELINES,
+        },
+    )
+    with pytest.raises(InvalidParamsError, match="检测参数与清单请求不一致"):
+        service.inspect_single(
+            "中压-MVS包装-AI拍照-2-1785457381050.jpg",
+            label_images[0],
+            mismatched_request,
+        )
+
+
+def test_single_label_requires_manifest_session():
+    service = MVSService(
+        rules=load_rules(),
+        ocr_backend=SimpleNamespace(infer=lambda image: [], decode_qr=lambda image: None),
+    )
+    request = MVSParams(
+        sn="SN002",
+        modelParams={
+            "product_type": "PackingList",
+            "target_names": "堵头",
+            "guideline_coordinates": FULL_GUIDELINES[:3],
+        },
+    )
+
+    result = service.inspect_single(
+        "中压-MVS包装-AI拍照-2-1785457381050.jpg",
+        np.full((100, 100, 3), 100, dtype=np.uint8),
+        request,
+    )
+
+    assert result["status"] == "false"
+    assert result["verdict"] == "REVIEW"
+    assert "先上传序号为 1" in result["message"]
+
+
+def test_single_manifest_fails_when_requested_target_is_missing():
+    service = MVSService(
+        rules=load_rules(),
+        ocr_backend=SimpleNamespace(infer=lambda image: [], decode_qr=lambda image: None),
+    )
+    service.quality_checker = SimpleNamespace(
+        check=lambda image: SimpleNamespace(acceptable=True, reasons=())
+    )
+    service.table_parser = SimpleNamespace(
+        parse=lambda tokens, image_width, image_height: [
+            PackingListItem(
+                line_no="20",
+                item_key="plug",
+                name_cn="堵头",
+                material_code="FQ001811",
+                confidence=0.95,
+            )
+        ]
+    )
+    request = MVSParams(
+        sn="SN003",
+        modelParams={
+            "product_type": "PackingList",
+            "target_names": "堵头,直接头",
+            "guideline_coordinates": FULL_GUIDELINES[:4],
+        },
+    )
+
+    result = service.inspect_single(
+        "中压-MVS包装-AI拍照-1-1785457380050.jpg",
+        np.full((100, 100, 3), 100, dtype=np.uint8),
+        request,
+    )
+
+    assert result["verdict"] == "FAIL"
+    assert [item["verdict"] for item in result["detailList"]] == [
+        "PASS",
+        "FAIL",
+    ]
+    assert result["detailList"][1]["name"] == ""
+
 
 def test_service_reviews_bad_manifest_before_ocr():
     rules = load_rules()
@@ -783,9 +962,13 @@ def test_onnx_backend_keeps_geometry_helpers_compatible():
     assert backend_side == geometry_side
 
 
-def test_plugin_exposes_only_multi_image_endpoint():
+def test_plugin_exposes_single_image_endpoint():
     routes = mvs_router.get_router().routes
     paths = [route.path for route in routes]
 
     assert paths == ["/mvs_inspect"]
-    assert routes[0].response_model.__name__ == "MVSResponse"
+    assert routes[0].response_model.__name__ == "CommonResponse"
+    assert [field.name for field in routes[0].dependant.body_params] == [
+        "file",
+        "json_data",
+    ]
