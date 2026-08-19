@@ -1,21 +1,20 @@
 # MVS 装箱清单物料检验插件
 
-插件通过 `vie.plugins` 注册 `/api/v1/mvs_inspect` 多图片接口。上传图片文件名必须以
-`-序号` 结尾，并完整提供 `-1` 至 `-4`：`-1` 是左右两份装箱清单，`-2` 至
-`-4` 依次对应 `target_names` 中的三个待检物料标签。
+插件通过 `vie.plugins` 注册 `/api/v1/mvs_inspect` 单图片即时检测接口。每次请求
+上传一张图片，文件名必须为 `<业务名称>-<序号>-<13位毫秒时间戳>.<扩展名>`。
+`-1-` 是左右两份装箱清单，`-2-` 起依次对应 `target_names` 中的待检物料标签；
+同一产品通过请求中的非空 `sn` 关联清单解析结果。
 
 ```bash
 curl -X POST http://127.0.0.1:3001/api/v1/mvs_inspect \
-  -F 'files=@packing-1.jpg' \
-  -F 'files=@packing-2.jpg' \
-  -F 'files=@packing-3.jpg' \
-  -F 'files=@packing-4.jpg' \
+  -F 'file=@中压-MVS包装-AI拍照-1-1785457380050.jpg' \
   -F 'json_data=<test.json'
 ```
 
-`modelParams.target_names` 必须提供三个有序检测项；`guideline_coordinates`
-必须提供五组归一化四顶点，前两组裁剪左右清单，后三组过滤图片 `-2` 至 `-4`
-的 OCR 文字框。响应中的业务状态为 `PASS`、`FAIL` 或 `REVIEW`。
+`modelParams.target_names` 必须提供至少一个有序检测项；`guideline_coordinates`
+必须提供 `2 + target_names 数量` 组归一化四顶点，前两组裁剪左右清单，后续组
+依次过滤实物图片的 OCR 文字框。每张图片同步返回统一 `CommonResponse`，业务
+状态为 `PASS`、`FAIL` 或 `REVIEW`。实物图片早于清单图片到达时返回 `REVIEW`。
 
 ## 运行依赖
 
@@ -70,6 +69,7 @@ conda run -n mobile_vision python \
 - `MVS_TEXTLINE_ORIENTATION_MODEL_DIR`：文本行方向模型目录
 - `MVS_TEXT_RECOGNITION_MODEL_DIR`：本地 PP-OCRv5 识别模型目录
 - `MVS_RULES_PATH`：外部物料规则 YAML；缺省使用插件内置规则
+- `MVS_SESSION_TTL_SECONDS`：按 SN 缓存清单解析结果的秒数，默认 1800
 
 生产部署应将模型放入 `weights/mvs/` 的版本化目录，并通过上述变量指定路径，避免
 启动时下载模型。
