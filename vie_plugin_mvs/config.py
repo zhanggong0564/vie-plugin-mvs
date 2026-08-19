@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
+from pydantic import Field
 from pydantic_settings import SettingsConfigDict
 
 from services.base import SceneSettings
@@ -46,7 +47,7 @@ class MVSRules:
         return None
 
 
-class _MVSRulesSettings(SceneSettings):
+class MVSSettings(SceneSettings):
     model_config = SettingsConfigDict(
         env_prefix="MVS_",
         env_file=".env",
@@ -54,13 +55,14 @@ class _MVSRulesSettings(SceneSettings):
     )
 
     rules_path: Path = Path(__file__).with_name("rules.yaml")
+    session_ttl_seconds: int = Field(default=1800, ge=1)
 
 
 def load_rules(path: str | None = None) -> MVSRules:
     settings = (
-        _MVSRulesSettings(rules_path=Path(path))
+        MVSSettings(rules_path=Path(path))
         if path is not None
-        else _MVSRulesSettings()
+        else MVSSettings()
     )
     rule_path = settings.rules_path
     try:

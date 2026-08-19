@@ -36,5 +36,13 @@ class MVSJudgeApi(BatchBusinessLogicBase):
             model_params.guideline_coordinates,
         )
 
+    def detect(self, params):
+        """检测单张清单或实物标签图片。"""
+        return self.service.inspect_single(
+            params.extra["filename"],
+            params.image,
+            params.extra["request_params"],
+        )
+
     def close(self) -> None:
         self.service.close()

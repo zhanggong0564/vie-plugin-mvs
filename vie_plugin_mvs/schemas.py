@@ -1,8 +1,9 @@
 import math
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from schemas import InspectionVerdict
+from schemas.common import AICameraModel as AICameraModelSchema
 from schemas.common import VisualReferenceParams
 
 
@@ -57,25 +58,22 @@ def _validate_quadrilateral(values) -> NormalizedQuadrilateral:
 
 class MVSModelParams(VisualReferenceParams):
     product_type: str = Field(..., min_length=1)
-    target_names: tuple[str, str, str]
-    guideline_coordinates: tuple[
-        NormalizedQuadrilateral,
-        NormalizedQuadrilateral,
-        NormalizedQuadrilateral,
-        NormalizedQuadrilateral,
-        NormalizedQuadrilateral,
-    ]
+    target_names: tuple[str, ...]
+    guideline_coordinates: tuple[NormalizedQuadrilateral, ...]
 
     @field_validator("target_names", mode="before")
     @classmethod
     def _split_target_names(cls, value):
         if isinstance(value, str):
             value = [item.strip() for item in value.split(",")]
-        if not isinstance(value, (list, tuple)) or len(value) != 3:
-            raise ValueError("target_names 必须包含 3 个检测项")
+        if not isinstance(value, (list, tuple)) or not value:
+            raise ValueError("target_names 至少包含 1 个检测项")
         if any(not isinstance(item, str) or not item.strip() for item in value):
             raise ValueError("target_names 检测项不能为空")
-        return tuple(item.strip() for item in value)
+        normalized = tuple(item.strip() for item in value)
+        if len(set(normalized)) != len(normalized):
+            raise ValueError("target_names 检测项不能重复")
+        return normalized
 
     @field_validator("guideline_coordinates", mode="before")
     @classmethod
@@ -90,15 +88,36 @@ class MVSModelParams(VisualReferenceParams):
                 [part.strip() for part in group.split(",") if part.strip()]
                 for group in groups
             ]
-        if not isinstance(value, (list, tuple)) or len(value) != 5:
-            raise ValueError("guideline_coordinates 必须包含 5 组四边形")
+        if not isinstance(value, (list, tuple)):
+            raise ValueError("guideline_coordinates 必须为四边形列表")
         return tuple(_validate_quadrilateral(group) for group in value)
+
+    @model_validator(mode="after")
+    def _validate_guideline_count(self):
+        expected = len(self.target_names) + 2
+        if len(self.guideline_coordinates) != expected:
+            raise ValueError(
+                f"guideline_coordinates 必须包含 {expected} 组四边形"
+            )
+        return self
 
 
 class MVSParams(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="allow")
 
+    sn: str = Field(..., min_length=1)
+    product: str = ""
+    type: str = ""
+    AICameraModel: AICameraModelSchema | None = None
     modelParams: MVSModelParams
+
+    @field_validator("sn")
+    @classmethod
+    def _validate_sn(cls, value):
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("sn 不能为空")
+        return normalized
 
 
 class PackingListItemResponse(BaseModel):
