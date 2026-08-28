@@ -3,7 +3,6 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from schemas import InspectionVerdict
-from schemas.common import AICameraModel as AICameraModelSchema
 from schemas.common import VisualReferenceParams
 
 
@@ -108,7 +107,7 @@ class MVSParams(BaseModel):
     sn: str = Field(..., min_length=1)
     product: str = ""
     type: str = ""
-    AICameraModel: AICameraModelSchema | None = None
+    AICameraModel: Any = None
     modelParams: MVSModelParams
 
     @field_validator("sn")
