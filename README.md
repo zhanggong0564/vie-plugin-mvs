@@ -11,6 +11,53 @@ curl -X POST http://127.0.0.1:3001/api/v1/mvs_inspect \
   -F 'json_data=<test.json'
 ```
 
+`json_data` 使用与 panel-label 一致的外部请求外壳。MVS 不使用
+`AICameraModel`，仅兼容接收并原样保留该业务字段，不校验其内部结构：
+
+```json
+{
+  "modelParams": {
+    "guide_line": [
+      {
+        "FileName": "装箱清单-引导线.png",
+        "FilePath": "http://files.example/manifest-guide.png"
+      }
+    ],
+    "example_images": [
+      {
+        "FileName": "装箱清单-示例.jpg",
+        "FilePath": "http://files.example/manifest-example.jpg"
+      }
+    ],
+    "guideline_coordinates": "0.0823,0.1827,0.4805,0.1827,0.4805,0.9180,0.0823,0.9180;0.4910,0.1827,0.8893,0.1827,0.8893,0.9180,0.4910,0.9180;0.4807,0.4378,0.6528,0.4378,0.6528,0.5119,0.4807,0.5119;0.4833,0.5056,0.6292,0.5056,0.6292,0.5796,0.4833,0.5796;0.5653,0.4130,0.6917,0.4130,0.6917,0.4648,0.5653,0.4648",
+    "target_names": "堵头,直接头,油水分离器",
+    "product_type": "PackingList"
+  },
+  "type": "ASG00592",
+  "product": "光伏并网逆变器_SG630MX-V316",
+  "sn": "A2570700040",
+  "AICameraModel": [
+    {
+      "Id": "909445fa451a4219ac88ef80c5e2b6fc",
+      "SN": "A2571500001",
+      "ProductName": "ASG00592",
+      "Version": 1,
+      "AIProductTypeName": "风电检验组",
+      "AIProductTypeValue": "风电检验组",
+      "ModelFile": "http://files.example/reference-v1.jpg",
+      "Remark": null,
+      "CreateBy": null,
+      "CreateTime": "2026-03-28T09:46:15",
+      "UpdateBy": null,
+      "UpdateTime": "2026-08-10T10:26:04",
+      "AIParameterName": "产品类型",
+      "AIParameterValue": "五路有熔丝盒有磁环",
+      "DictionaryCode": null
+    }
+  ]
+}
+```
+
 `modelParams.target_names` 必须提供至少一个有序检测项；`guideline_coordinates`
 必须提供 `2 + target_names 数量` 组归一化四顶点，前两组裁剪左右清单，后续组
 依次过滤实物图片的 OCR 文字框。每张图片同步返回统一 `CommonResponse`，业务
