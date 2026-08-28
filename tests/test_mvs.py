@@ -122,7 +122,7 @@ def test_request_accepts_dynamic_targets_and_full_business_payload():
         sn="SN001",
         product="PackingList",
         type="",
-        AICameraModel=None,
+        AICameraModel=[],
         custom_field="透传",
         modelParams={
             "product_type": "PackingList",
@@ -133,8 +133,85 @@ def test_request_accepts_dynamic_targets_and_full_business_payload():
         },
     )
 
+    assert request.AICameraModel == []
     assert request.modelParams.target_names == ("堵头",)
     assert len(request.modelParams.guideline_coordinates) == 3
+
+
+def test_request_does_not_validate_unused_ai_camera_model():
+    request = MVSParams(
+        sn="SN001",
+        AICameraModel=[{"business_field": "透传"}],
+        modelParams={
+            "product_type": "PackingList",
+            "target_names": "堵头",
+            "guideline_coordinates": ";".join(
+                "0.1,0.1,0.9,0.1,0.9,0.9,0.1,0.9" for _ in range(3)
+            ),
+        },
+    )
+
+    assert request.AICameraModel == [{"business_field": "透传"}]
+
+
+def test_request_accepts_panel_label_style_ai_camera_model_list():
+    request = MVSParams(
+        sn="A2570700040",
+        product="光伏并网逆变器_SG630MX-V316",
+        type="ASG00592",
+        AICameraModel=[
+            {
+                "Id": "c7fb6f995e524815af9fcbe1560c9e8c",
+                "SN": "A2571500001",
+                "ProductName": "ASG00592",
+                "Version": 4,
+                "AIProductTypeName": "风电检验组",
+                "AIProductTypeValue": "风电检验组",
+                "ModelFile": "http://files.example/reference-v4.jpg",
+                "CreateTime": "2026-03-28T13:37:47",
+                "UpdateTime": "2026-03-28T13:37:47",
+            },
+            {
+                "Id": "909445fa451a4219ac88ef80c5e2b6fc",
+                "SN": "A2571500001",
+                "ProductName": "ASG00592",
+                "Version": 1,
+                "AIProductTypeName": "风电检验组",
+                "AIProductTypeValue": "风电检验组",
+                "ModelFile": "http://files.example/reference-v1.jpg",
+                "CreateTime": "2026-03-28T09:46:15",
+                "UpdateTime": "2026-08-10T10:26:04",
+                "AIParameterName": "产品类型",
+                "AIParameterValue": "五路有熔丝盒有磁环",
+            },
+        ],
+        modelParams={
+            "guide_line": [
+                {
+                    "FileName": "装箱清单-引导线.png",
+                    "FilePath": "http://files.example/manifest-guide.png",
+                }
+            ],
+            "example_images": [
+                {
+                    "FileName": "装箱清单-示例.jpg",
+                    "FilePath": "http://files.example/manifest-example.jpg",
+                }
+            ],
+            "product_type": "PackingList",
+            "target_names": "堵头,直接头,油水分离器",
+            "guideline_coordinates": ";".join(
+                "0.1,0.1,0.9,0.1,0.9,0.9,0.1,0.9" for _ in range(5)
+            ),
+        },
+    )
+
+    assert request.type == "ASG00592"
+    assert len(request.AICameraModel) == 2
+    assert request.AICameraModel[1]["Version"] == 1
+    assert request.AICameraModel[1]["AIParameterValue"] == "五路有熔丝盒有磁环"
+    assert request.modelParams.guide_line[0].FileName == "装箱清单-引导线.png"
+    assert request.modelParams.example_images[0].FileName == "装箱清单-示例.jpg"
 
 
 def test_single_image_filename_uses_penultimate_number_as_sequence():
