@@ -69,8 +69,9 @@ def test_rules_configure_supported_items_and_code_sources():
     assert rules.item_key_for_name("Oil-water separator") == "oil_water_separator"
 
 
-def test_request_parses_three_targets_and_five_normalized_quadrilaterals():
-    guideline = ";".join(
+@pytest.mark.parametrize("separator", ["|", " | "])
+def test_request_parses_three_targets_and_five_normalized_quadrilaterals(separator):
+    guideline = separator.join(
         "0.1,0.1,0.9,0.1,0.9,0.9,0.1,0.9" for _ in range(5)
     )
 
@@ -78,19 +79,30 @@ def test_request_parses_three_targets_and_five_normalized_quadrilaterals():
         sn="SN001",
         modelParams={
             "product_type": "PackingList",
-            "target_names": "堵头,直接头,油水分离器",
+            "target_names": separator.join(TARGET_NAMES),
             "guideline_coordinates": guideline,
         }
     )
 
     assert request.modelParams.target_names == TARGET_NAMES
     assert len(request.modelParams.guideline_coordinates) == 5
+    assert request.modelParams.guideline_coordinates == (
+        (0.1, 0.1, 0.9, 0.1, 0.9, 0.9, 0.1, 0.9),
+    ) * 5
 
 
 @pytest.mark.parametrize(
     ("field", "value", "message"),
     [
-        ("target_names", "堵头,堵头", "不能重复"),
+        ("target_names", "堵头|堵头", "不能重复"),
+        ("target_names", "堵头||直接头", "不能为空"),
+        ("target_names", "堵头|直接头|", "不能为空"),
+        ("target_names", "堵头,直接头,油水分离器", "3 组四边形"),
+        (
+            "guideline_coordinates",
+            ";".join("0.1,0.1,0.9,0.1,0.9,0.9,0.1,0.9" for _ in range(5)),
+            "8 个四顶点坐标",
+        ),
         (
             "guideline_coordinates",
             "0.1,0.1,0.9,0.1,0.9,0.9,0.1,0.9",
@@ -98,7 +110,7 @@ def test_request_parses_three_targets_and_five_normalized_quadrilaterals():
         ),
         (
             "guideline_coordinates",
-            ";".join("0.1,0.1,0.9,0.9,0.9,0.1,0.1,0.9" for _ in range(5)),
+            "|".join("0.1,0.1,0.9,0.9,0.9,0.1,0.1,0.9" for _ in range(5)),
             "顶点顺序",
         ),
     ],
@@ -106,8 +118,8 @@ def test_request_parses_three_targets_and_five_normalized_quadrilaterals():
 def test_request_rejects_invalid_four_image_contract(field, value, message):
     data = {
         "product_type": "PackingList",
-        "target_names": ",".join(TARGET_NAMES),
-        "guideline_coordinates": ";".join(
+        "target_names": "|".join(TARGET_NAMES),
+        "guideline_coordinates": "|".join(
             "0.1,0.1,0.9,0.1,0.9,0.9,0.1,0.9" for _ in range(5)
         ),
     }
@@ -127,7 +139,7 @@ def test_request_accepts_dynamic_targets_and_full_business_payload():
         modelParams={
             "product_type": "PackingList",
             "target_names": "堵头",
-            "guideline_coordinates": ";".join(
+            "guideline_coordinates": "|".join(
                 "0.1,0.1,0.9,0.1,0.9,0.9,0.1,0.9" for _ in range(3)
             ),
         },
@@ -145,7 +157,7 @@ def test_request_does_not_validate_unused_ai_camera_model():
         modelParams={
             "product_type": "PackingList",
             "target_names": "堵头",
-            "guideline_coordinates": ";".join(
+            "guideline_coordinates": "|".join(
                 "0.1,0.1,0.9,0.1,0.9,0.9,0.1,0.9" for _ in range(3)
             ),
         },
@@ -199,8 +211,8 @@ def test_request_accepts_panel_label_style_ai_camera_model_list():
                 }
             ],
             "product_type": "PackingList",
-            "target_names": "堵头,直接头,油水分离器",
-            "guideline_coordinates": ";".join(
+            "target_names": "堵头|直接头|油水分离器",
+            "guideline_coordinates": "|".join(
                 "0.1,0.1,0.9,0.1,0.9,0.9,0.1,0.9" for _ in range(5)
             ),
         },
@@ -804,7 +816,7 @@ def test_single_manifest_fails_when_requested_target_is_missing():
         sn="SN003",
         modelParams={
             "product_type": "PackingList",
-            "target_names": "堵头,直接头",
+            "target_names": "堵头|直接头",
             "guideline_coordinates": FULL_GUIDELINES[:4],
         },
     )
