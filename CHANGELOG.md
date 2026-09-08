@@ -5,6 +5,8 @@
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-08（Git tag: `v0.2.0`）
+
 ### 修复
 
 - editable 安装不再生成遮蔽 Python 源码的 Cython `.so`，并将
