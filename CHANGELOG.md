@@ -7,6 +7,11 @@
 
 ### 修复
 
+- editable 安装不再生成遮蔽 Python 源码的 Cython `.so`，并将
+  `onnxruntime-gpu` 版本与框架运行环境统一为 1.20.2。
+
+### 修复
+
 - 兼容接收业务下发的 `AICameraModel` 字段但不校验其内部结构，避免 MVS
   因未使用字段的格式差异拒绝请求。
 
