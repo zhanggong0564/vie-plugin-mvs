@@ -57,14 +57,18 @@ def _validate_quadrilateral(values) -> NormalizedQuadrilateral:
 
 class MVSModelParams(VisualReferenceParams):
     product_type: str = Field(..., min_length=1)
-    target_names: tuple[str, ...]
-    guideline_coordinates: tuple[NormalizedQuadrilateral, ...]
+    target_names: tuple[str, ...] = Field(
+        ..., description="有序检测项，字符串使用 | 分隔"
+    )
+    guideline_coordinates: tuple[NormalizedQuadrilateral, ...] = Field(
+        ..., description="归一化四顶点，字符串组间使用 | 分隔，组内坐标使用逗号分隔"
+    )
 
     @field_validator("target_names", mode="before")
     @classmethod
     def _split_target_names(cls, value):
         if isinstance(value, str):
-            value = [item.strip() for item in value.split(",")]
+            value = [item.strip() for item in value.split("|")]
         if not isinstance(value, (list, tuple)) or not value:
             raise ValueError("target_names 至少包含 1 个检测项")
         if any(not isinstance(item, str) or not item.strip() for item in value):
@@ -80,7 +84,7 @@ class MVSModelParams(VisualReferenceParams):
         if isinstance(value, str):
             groups = [
                 group.strip()
-                for group in value.split(";")
+                for group in value.split("|")
                 if group.strip()
             ]
             value = [
