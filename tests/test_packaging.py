@@ -2,6 +2,7 @@ import runpy
 from pathlib import Path
 
 from Cython import Build
+import pytest
 import setuptools
 
 
@@ -42,3 +43,19 @@ def test_plugin_uses_binary_wheel_build_contract(monkeypatch):
     assert setup_kwargs["cmdclass"]["build_py"] is setup_globals[
         "BuildPyInitOnly"
     ]
+
+
+def test_editable_install_does_not_build_source_extensions(monkeypatch):
+    plugin_root = Path(__file__).resolve().parents[1]
+    setup_kwargs = {}
+
+    monkeypatch.setattr(setuptools, "setup", lambda **kwargs: setup_kwargs.update(kwargs))
+    monkeypatch.setattr(Build, "cythonize", lambda *_args, **_kwargs: pytest.fail(
+        "editable install must not cythonize source files"
+    ))
+    monkeypatch.setattr("sys.argv", ["setup.py", "editable_wheel"])
+    monkeypatch.chdir(plugin_root)
+
+    runpy.run_path(str(plugin_root / "setup.py"), run_name="__build_contract__")
+
+    assert setup_kwargs["ext_modules"] == []
