@@ -3,6 +3,7 @@
 cython 把业务模块编译为 .so，wheel 仅含 __init__.py + .so + 元数据，不落明文业务源码。
 元数据（name/version/entry-points/dependencies）由 pyproject.toml [project] 提供。
 """
+import sys
 from pathlib import Path
 
 from setuptools import setup
@@ -17,6 +18,9 @@ PKG = next(p.name for p in Path(__file__).parent.iterdir()
 py_sources = [str(p) for p in Path(PKG).rglob("*.py")
               if p.name != "__init__.py" and "build" not in p.parts]
 
+# editable 安装用于本地开发，避免生成会遮蔽同名 .py 的源码旁 .so。
+BUILD_BINARY_EXTENSIONS = "editable_wheel" not in sys.argv
+
 
 class BuildPyInitOnly(build_py):
     """只把 __init__.py 作为源码打入 wheel；其余 .py 已编成 .so，剔除以防明文泄露。"""
@@ -28,9 +32,14 @@ class BuildPyInitOnly(build_py):
 setup(
     # build_dir 把 .c 写到 build/；annotation_typing=False 关闭 Cython3 注解类型强制
     # （否则 FastAPI Form()/pydantic 字段注解冲突报 "Expected str, got Form"）
-    ext_modules=cythonize(
-        py_sources, build_dir="build",
-        compiler_directives={"language_level": "3", "annotation_typing": False},
+    ext_modules=(
+        cythonize(
+            py_sources,
+            build_dir="build",
+            compiler_directives={"language_level": "3", "annotation_typing": False},
+        )
+        if BUILD_BINARY_EXTENSIONS
+        else []
     ),
     cmdclass={"build_py": BuildPyInitOnly},
 )
