@@ -201,7 +201,7 @@ def _html(width: int, height: int) -> bytes:
         ...trailing.map(values => values.map(
           value => Number(value).toFixed(4)
         ).join(",")),
-      ].join(";");
+      ].join("|");
     }}
 
     function render() {{
